@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SnapHost</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Left Sidebar: Profile List & Switch Mode -->
+    <aside class="sidebar">
+      <div class="brand-header">
+        <div class="brand-title">
+          <span class="bolt">⚡</span>
+          <div>
+            <h1>SnapHost</h1>
+            <p class="subtitle">Apple Silicon Hosts Engine</p>
+          </div>
+        </div>
+        <button id="btn-new-profile" class="btn btn-primary btn-sm" title="새 프로필 추가">+ 추가</button>
+      </div>
+
+      <div class="mode-bar">
+        <label class="mode-toggle">
+          <input type="checkbox" id="chk-single-mode" />
+          <span>단일 전환 모드 (Gas Mask 방식)</span>
+        </label>
+      </div>
+
+      <ul id="profile-list" class="profile-list"></ul>
+
+      <div class="sidebar-footer">
+        <div id="perm-banner" class="perm-status">
+          <span id="perm-dot" class="dot"></span>
+          <span id="perm-text">권한 확인 중...</span>
+          <button id="btn-grant-perm" class="btn btn-xs">1회 권한 부여</button>
+        </div>
+        <div class="footer-actions">
+          <button id="btn-preview-merged" class="btn btn-secondary btn-block">🔍 최종 병합된 /etc/hosts 미리보기</button>
+          <button id="btn-panic-restore" class="btn btn-danger-ghost btn-block">🛡️ 원본 백업으로 긴급 복구</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Right Main Area: Editor & Diagnostics -->
+    <main class="editor-pane">
+      <header class="editor-header">
+        <div class="profile-meta">
+          <input id="input-profile-name" type="text" class="profile-name-input" placeholder="프로필 이름" />
+          <span id="badge-active-state" class="badge">비활성</span>
+        </div>
+        <div class="editor-actions">
+          <span class="shortcut-hint">주석 토글: <kbd>⌘</kbd>+<kbd>/</kbd> · 저장: <kbd>⌘</kbd>+<kbd>S</kbd></span>
+          <button id="btn-delete-profile" class="btn btn-danger-outline btn-sm">삭제</button>
+          <button id="btn-save-profile" class="btn btn-primary btn-sm">저장 및 즉시 반영</button>
+        </div>
+      </header>
+
+      <div class="editor-workspace">
+        <div class="line-numbers" id="line-numbers">1</div>
+        <textarea
+          id="hosts-textarea"
+          class="hosts-textarea"
+          spellcheck="false"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          placeholder="# 예시:&#10;127.0.0.1       local.myapp.dev&#10;127.0.0.1:3000  web.myapp.dev # 포트 직접 매핑"
+        ></textarea>
+      </div>
+
+      <!-- Bottom Status / Port Mappings & Validation Bar -->
+      <footer class="diagnostics-bar">
+        <div id="validation-summary" class="diag-section">
+          <span class="diag-ok">✓ 문법 이상 없음</span>
+        </div>
+        <div id="port-mapping-summary" class="diag-section"></div>
+      </footer>
+    </main>
+  </div>
+
+  <!-- Modal for Merged Preview -->
+  <div id="modal-preview" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2>최종 병합된 <code>/private/etc/hosts</code> 미리보기</h2>
+        <button id="btn-close-modal" class="btn btn-sm">닫기</button>
+      </div>
+      <pre id="merged-preview-code" class="preview-code"></pre>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
