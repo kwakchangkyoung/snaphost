@@ -1,7 +1,8 @@
 use serde::Serialize;
 use snaphost_core::{
-    LocalReverseProxy, MergeResult, PortMapping, Profile, SnapHostManager, SystemStatus,
-    ValidationIssue, check_port_alive, validate_hosts,
+    CURRENT_VERSION, LocalReverseProxy, MergeResult, PortMapping, Profile, SnapHostManager,
+    SystemStatus, UpdateInfo, ValidationIssue, check_for_updates, check_port_alive,
+    download_and_install_update, validate_hosts,
 };
 use std::sync::Mutex;
 use tauri::{
@@ -23,6 +24,7 @@ pub struct PortMappingStatus {
 
 #[derive(Serialize)]
 pub struct AppSnapshot {
+    pub app_version: String,
     pub profiles: Vec<Profile>,
     pub single_switch_mode: bool,
     pub status: SystemStatus,
@@ -49,6 +51,7 @@ fn build_snapshot(mgr: &SnapHostManager, proxy: &LocalReverseProxy) -> AppSnapsh
         .collect();
 
     AppSnapshot {
+        app_version: CURRENT_VERSION.to_string(),
         profiles: mgr.profiles().to_vec(),
         single_switch_mode: mgr.single_switch_mode(),
         status: mgr.status(),
@@ -177,6 +180,22 @@ fn validate_hosts_text(content: String) -> Vec<ValidationIssue> {
     validate_hosts(&content)
 }
 
+#[tauri::command]
+fn check_update() -> Result<UpdateInfo, String> {
+    check_for_updates()
+}
+
+#[tauri::command]
+fn install_update(
+    app: AppHandle,
+    download_url: String,
+    asset_name: String,
+) -> Result<(), String> {
+    download_and_install_update(&download_url, &asset_name)?;
+    app.exit(0);
+    Ok(())
+}
+
 fn build_tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let state = app.state::<AppState>();
     let mgr = state.manager.lock().unwrap();
@@ -224,10 +243,18 @@ fn build_tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         true,
         None::<&str>,
     )?;
+    let check_upd = MenuItem::with_id(
+        app,
+        "check_update_menu",
+        format!("업데이트 확인 (현재 v{CURRENT_VERSION})..."),
+        true,
+        None::<&str>,
+    )?;
     let quit = MenuItem::with_id(app, "quit", "SnapHost 종료", true, Some("CmdOrCtrl+Q"))?;
 
     menu.append(&open_editor)?;
     menu.append(&flush_dns)?;
+    menu.append(&check_upd)?;
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&quit)?;
 
@@ -286,11 +313,31 @@ pub fn run() {
                         }
                     } else if id == "flush_dns" {
                         let _ = snaphost_core::flush_dns_cache();
+                    } else if id == "check_update_menu" {
+                        #[cfg(target_os = "macos")]
+                        let _ = app.set_activation_policy(ActivationPolicy::Regular);
+                        if let Some(win) = app.get_webview_window("main") {
+                            let _ = win.show();
+                            let _ = win.unminimize();
+                            let _ = win.set_focus();
+                        }
+                        let _ = app.emit("trigger-update-check", ());
                     } else if id == "quit" {
                         app.exit(0);
                     }
                 })
                 .build(app)?;
+
+            // 앱 시작 시 백그라운드에서 GitHub 최신 릴리즈 자동 체크
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                if let Ok(info) = check_for_updates() {
+                    if info.update_available {
+                        let _ = handle.emit("update-available", info);
+                    }
+                }
+            });
 
             Ok(())
         })
@@ -315,6 +362,8 @@ pub fn run() {
             grant_permission,
             panic_restore,
             validate_hosts_text,
+            check_update,
+            install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SnapHost application");

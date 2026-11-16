@@ -24,6 +24,13 @@ const btnGrantPerm = document.getElementById("btn-grant-perm");
 const btnDeleteProfile = document.getElementById("btn-delete-profile");
 const modalPreview = document.getElementById("modal-preview");
 const mergedPreviewCode = document.getElementById("merged-preview-code");
+const appVersionEl = document.getElementById("app-version");
+const updateBanner = document.getElementById("update-banner");
+const updateText = document.getElementById("update-text");
+const btnInstallUpdate = document.getElementById("btn-install-update");
+const btnCheckUpdate = document.getElementById("btn-check-update");
+
+let pendingUpdate = null;
 
 async function loadSnapshot() {
   if (!invoke) return;
@@ -33,6 +40,9 @@ async function loadSnapshot() {
 
 function applySnapshot(snapshot) {
   appState = snapshot;
+  if (snapshot.app_version && appVersionEl) {
+    appVersionEl.textContent = `v${snapshot.app_version}`;
+  }
   chkSingleMode.checked = snapshot.single_switch_mode;
 
   if (!selectedProfileId || !snapshot.profiles.some((p) => p.id === selectedProfileId)) {
@@ -293,8 +303,71 @@ document.getElementById("btn-panic-restore").onclick = async () => {
   }
 };
 
+function showUpdateBanner(info) {
+  pendingUpdate = info;
+  updateText.textContent = `🎉 새 버전 v${info.latest_version} 출시!`;
+  updateBanner.classList.remove("hidden");
+}
+
+async function checkForUpdateManual(silentIfLatest = false) {
+  if (!invoke) return;
+  try {
+    btnCheckUpdate.textContent = "🔄 버전 확인 중...";
+    btnCheckUpdate.disabled = true;
+    const info = await invoke("check_update");
+    if (info.update_available) {
+      showUpdateBanner(info);
+      if (!silentIfLatest) {
+        if (confirm(`새로운 버전(v${info.latest_version})이 있습니다!\n지금 바로 다운로드하여 자동 업데이트하시겠습니까?`)) {
+          await triggerInstallUpdate();
+        }
+      }
+    } else if (!silentIfLatest) {
+      alert(`현재 최신 버전(v${info.current_version})을 사용 중입니다.`);
+    }
+  } catch (err) {
+    if (!silentIfLatest) {
+      alert("업데이트 확인 실패: " + err);
+    }
+  } finally {
+    btnCheckUpdate.textContent = "🔄 GitHub 신규 버전 확인";
+    btnCheckUpdate.disabled = false;
+  }
+}
+
+async function triggerInstallUpdate() {
+  if (!pendingUpdate) return;
+  if (!pendingUpdate.download_url || !pendingUpdate.asset_name) {
+    alert("릴리즈 페이지에서 설치 파일을 다운로드해 주세요: " + pendingUpdate.release_url);
+    return;
+  }
+  try {
+    btnInstallUpdate.textContent = "설치 중...";
+    btnInstallUpdate.disabled = true;
+    await invoke("install_update", {
+      downloadUrl: pendingUpdate.download_url,
+      assetName: pendingUpdate.asset_name,
+    });
+  } catch (err) {
+    alert("자동 업데이트 실패: " + err);
+    btnInstallUpdate.textContent = "자동 업데이트";
+    btnInstallUpdate.disabled = false;
+  }
+}
+
+btnCheckUpdate.onclick = () => checkForUpdateManual(false);
+btnInstallUpdate.onclick = triggerInstallUpdate;
+
 if (listen) {
   listen("profiles-updated", () => loadSnapshot());
+  listen("update-available", (event) => {
+    if (event.payload) {
+      showUpdateBanner(event.payload);
+    }
+  });
+  listen("trigger-update-check", () => {
+    checkForUpdateManual(false);
+  });
 }
 
 window.addEventListener("DOMContentLoaded", loadSnapshot);

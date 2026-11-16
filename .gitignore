@@ -9,5 +9,6 @@
 .idea/
 .vscode/
 
-# Tauri generated schemas
+# Tauri generated schemas & signing keys
 /src-tauri/gen/
+/.tauri-key/

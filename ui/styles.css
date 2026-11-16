@@ -69,6 +69,39 @@ body {
   letter-spacing: -0.3px;
 }
 
+.version-tag {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  padding: 2px 5px;
+  border-radius: 4px;
+  vertical-align: middle;
+}
+
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  padding: 7px 9px;
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: #34d399;
+  border-radius: 6px;
+}
+
+.update-banner.hidden {
+  display: none;
+}
+
+.btn-success {
+  background: var(--success);
+  color: #06281e;
+  font-weight: 600;
+}
+
 .subtitle {
   font-size: 11px;
   color: var(--text-muted);

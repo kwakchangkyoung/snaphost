@@ -14,7 +14,7 @@
         <div class="brand-title">
           <span class="bolt">⚡</span>
           <div>
-            <h1>SnapHost</h1>
+            <h1>SnapHost <span id="app-version" class="version-tag">v0.1.0</span></h1>
             <p class="subtitle">Apple Silicon Hosts Engine</p>
           </div>
         </div>
@@ -31,6 +31,10 @@
       <ul id="profile-list" class="profile-list"></ul>
 
       <div class="sidebar-footer">
+        <div id="update-banner" class="update-banner hidden">
+          <span id="update-text">🎉 새 버전 출시!</span>
+          <button id="btn-install-update" class="btn btn-xs btn-success">자동 업데이트</button>
+        </div>
         <div id="perm-banner" class="perm-status">
           <span id="perm-dot" class="dot"></span>
           <span id="perm-text">권한 확인 중...</span>
@@ -38,6 +42,7 @@
         </div>
         <div class="footer-actions">
           <button id="btn-preview-merged" class="btn btn-secondary btn-block">🔍 최종 병합된 /etc/hosts 미리보기</button>
+          <button id="btn-check-update" class="btn btn-secondary btn-block">🔄 GitHub 신규 버전 확인</button>
           <button id="btn-panic-restore" class="btn btn-danger-ghost btn-block">🛡️ 원본 백업으로 긴급 복구</button>
         </div>
       </div>
