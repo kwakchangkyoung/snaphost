@@ -1,0 +1,52 @@
+name: Release macOS App (.dmg & .app)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release-macos:
+    name: Build & Release SnapHost (Apple Silicon)
+    runs-on: macos-14 # Apple Silicon (M1/M2/M3) runner
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Run Core Unit Tests
+        run: cargo test -p snaphost-core
+
+      - name: Build macOS .app and .dmg via Tauri Action
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "SnapHost ${{ github.ref_name }}"
+          releaseBody: |
+            ## ⚡ SnapHost ${{ github.ref_name }} (macOS Apple Silicon)
+
+            ### 📦 설치 방법 (Installation)
+            1. 아래 Assets에서 **`SnapHost_x.x.x_aarch64.dmg`** 파일을 다운로드합니다.
+            2. `SnapHost.app`을 `Applications(응용 프로그램)` 폴더로 드래그합니다.
+            3. (Apple 개발자 인증서 미서명 빌드인 경우) 최초 실행 시 터미널에서 아래 명령어를 한 번 실행하면 차단 없이 바로 열립니다:
+               ```bash
+               xattr -cr /Applications/SnapHost.app
+               ```
+          releaseDraft: false
+          prerelease: false
+          args: --target aarch64-apple-darwin
