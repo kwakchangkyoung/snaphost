@@ -122,15 +122,10 @@ impl SnapHostManager {
 
         let mut modified_active = false;
         if single_mode {
-            let mut kept_one = false;
             for p in &mut self.state.profiles {
                 if !p.is_system_base && p.enabled {
-                    if !kept_one {
-                        kept_one = true;
-                    } else {
-                        p.enabled = false;
-                        modified_active = true;
-                    }
+                    p.enabled = false;
+                    modified_active = true;
                 }
             }
         }
