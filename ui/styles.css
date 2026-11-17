@@ -644,7 +644,7 @@ input:checked + .slider::before {
   align-items: center;
   gap: 7px;
   color: var(--muted);
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
@@ -654,6 +654,8 @@ input:checked + .slider::before {
 .diag-status.is-error {
   color: var(--negative);
   font-weight: 500;
+  flex-shrink: 0;
+  max-width: 60%;
 }
 
 .route-strip {
@@ -662,7 +664,6 @@ input:checked + .slider::before {
   gap: 6px;
   flex: 0 1 auto;
   min-width: 0;
-  max-width: 60%;
   overflow-x: auto;
 }
 
