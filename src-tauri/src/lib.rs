@@ -204,7 +204,7 @@ fn build_tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let header = MenuItem::with_id(
         app,
         "header",
-        "⚡ SnapHost — 빠른 프로필 전환",
+        "SnapHost 프로필 전환",
         false,
         None::<&str>,
     )?;

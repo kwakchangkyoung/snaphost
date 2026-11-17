@@ -2,18 +2,27 @@ const invoke = window.__TAURI__?.core?.invoke;
 const listen = window.__TAURI__?.event?.listen;
 
 let appState = {
+  app_version: "0.1.0",
   profiles: [],
   single_switch_mode: false,
   status: null,
   preview: null,
+  port_statuses: [],
+  proxy_running: false,
+  proxy_port: 80,
 };
 let selectedProfileId = null;
+let isDirty = false;
+let pendingUpdate = null;
+let toastTimer = null;
 
 // DOM Elements
 const profileListEl = document.getElementById("profile-list");
+const ledgerSummaryEl = document.getElementById("ledger-summary");
 const chkSingleMode = document.getElementById("chk-single-mode");
 const inputProfileName = document.getElementById("input-profile-name");
 const badgeActiveState = document.getElementById("badge-active-state");
+const badgeDirtyState = document.getElementById("badge-dirty-state");
 const textarea = document.getElementById("hosts-textarea");
 const lineNumbers = document.getElementById("line-numbers");
 const validationSummary = document.getElementById("validation-summary");
@@ -22,15 +31,53 @@ const permDot = document.getElementById("perm-dot");
 const permText = document.getElementById("perm-text");
 const btnGrantPerm = document.getElementById("btn-grant-perm");
 const btnDeleteProfile = document.getElementById("btn-delete-profile");
-const modalPreview = document.getElementById("modal-preview");
-const mergedPreviewCode = document.getElementById("merged-preview-code");
 const appVersionEl = document.getElementById("app-version");
 const updateBanner = document.getElementById("update-banner");
 const updateText = document.getElementById("update-text");
 const btnInstallUpdate = document.getElementById("btn-install-update");
 const btnCheckUpdate = document.getElementById("btn-check-update");
+const toastEl = document.getElementById("toast");
 
-let pendingUpdate = null;
+// Dialogs
+const dialogNewProfile = document.getElementById("dialog-new-profile");
+const formNewProfile = document.getElementById("form-new-profile");
+const newProfileNameInput = document.getElementById("new-profile-name");
+const dialogConfirm = document.getElementById("dialog-confirm");
+const confirmTitle = document.getElementById("confirm-title");
+const confirmMessage = document.getElementById("confirm-message");
+const btnConfirmCancel = document.getElementById("btn-confirm-cancel");
+const btnConfirmOk = document.getElementById("btn-confirm-ok");
+const dialogPreview = document.getElementById("dialog-preview");
+const mergedPreviewCode = document.getElementById("merged-preview-code");
+
+function showToast(message) {
+  if (!toastEl) return;
+  toastEl.textContent = message;
+  toastEl.classList.remove("hidden");
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toastEl.classList.add("hidden");
+  }, 2600);
+}
+
+function askConfirm(title, message, okLabel = "확인") {
+  return new Promise((resolve) => {
+    confirmTitle.textContent = title;
+    confirmMessage.textContent = message;
+    btnConfirmOk.textContent = okLabel;
+
+    const cleanup = (result) => {
+      btnConfirmCancel.onclick = null;
+      btnConfirmOk.onclick = null;
+      dialogConfirm.close();
+      resolve(result);
+    };
+
+    btnConfirmCancel.onclick = () => cleanup(false);
+    btnConfirmOk.onclick = () => cleanup(true);
+    dialogConfirm.showModal();
+  });
+}
 
 async function loadSnapshot() {
   if (!invoke) return;
@@ -49,22 +96,33 @@ function applySnapshot(snapshot) {
     selectedProfileId = snapshot.profiles[0]?.id || null;
   }
 
+  renderLedgerSummary();
   renderSidebar();
   renderPermissionStatus();
   renderSelectedProfile();
   renderPortMappings();
 }
 
+function renderLedgerSummary() {
+  const activeCount = appState.profiles.filter((p) => p.enabled).length;
+  const previewText = appState.preview?.hosts_content || "";
+  const domainLines = previewText
+    .split("\n")
+    .filter((l) => l.trim() && !l.trim().startsWith("#")).length;
+  const proxyCount = (appState.port_statuses || []).length;
+  ledgerSummaryEl.textContent = `활성 ${activeCount}개 · 규칙 ${domainLines}건 · 프록시 ${proxyCount}건`;
+}
+
 function renderPermissionStatus() {
   if (!appState.status) return;
   if (appState.status.hosts_writable) {
-    permDot.className = "dot ok";
-    permText.textContent = "즉시 전환(0ms) 활성화됨";
-    btnGrantPerm.style.display = "none";
+    permDot.className = "status-dot ok";
+    permText.textContent = "즉시 전환(0ms) 활성";
+    btnGrantPerm.classList.add("hidden");
   } else {
-    permDot.className = "dot";
-    permText.textContent = "/etc/hosts 쓰기 권한 필요";
-    btnGrantPerm.style.display = "inline-block";
+    permDot.className = "status-dot";
+    permText.textContent = "hosts 쓰기 권한 필요";
+    btnGrantPerm.classList.remove("hidden");
   }
 }
 
@@ -72,7 +130,13 @@ function renderSidebar() {
   profileListEl.innerHTML = "";
   appState.profiles.forEach((profile) => {
     const li = document.createElement("li");
-    li.className = `profile-item ${profile.id === selectedProfileId ? "selected" : ""}`;
+    const classes = ["profile-item"];
+    if (profile.id === selectedProfileId) classes.push("selected");
+    if (profile.enabled) classes.push("is-enabled");
+    li.className = classes.join(" ");
+    li.setAttribute("role", "option");
+    li.setAttribute("aria-selected", profile.id === selectedProfileId ? "true" : "false");
+
     li.onclick = (e) => {
       if (e.target.tagName === "INPUT" || e.target.classList.contains("slider")) return;
       selectedProfileId = profile.id;
@@ -83,6 +147,10 @@ function renderSidebar() {
     const left = document.createElement("div");
     left.className = "profile-left";
 
+    const bar = document.createElement("span");
+    bar.className = "profile-active-bar";
+    left.appendChild(bar);
+
     const nameSpan = document.createElement("span");
     nameSpan.className = "profile-name";
     nameSpan.textContent = profile.name;
@@ -90,13 +158,14 @@ function renderSidebar() {
 
     if (profile.is_system_base) {
       const baseTag = document.createElement("span");
-      baseTag.className = "tag-base";
+      baseTag.className = "tag-base num";
       baseTag.textContent = "BASE";
       left.appendChild(baseTag);
     }
 
     const label = document.createElement("label");
     label.className = "switch";
+    label.title = profile.enabled ? "프로필 끄기" : "프로필 켜기";
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.checked = profile.enabled;
@@ -107,8 +176,9 @@ function renderSidebar() {
           enabled: checkbox.checked,
         });
         applySnapshot(nextSnapshot);
+        showToast(`${profile.name} ${checkbox.checked ? "적용됨" : "해제됨"}`);
       } catch (err) {
-        alert("프로필 전환 실패: " + err);
+        showToast(`전환 실패: ${err}`);
         checkbox.checked = !checkbox.checked;
       }
     };
@@ -124,23 +194,37 @@ function renderSidebar() {
   });
 }
 
+function setDirty(dirty) {
+  isDirty = dirty;
+  if (dirty) {
+    badgeDirtyState.classList.remove("hidden");
+  } else {
+    badgeDirtyState.classList.add("hidden");
+  }
+}
+
 function renderSelectedProfile() {
   const profile = appState.profiles.find((p) => p.id === selectedProfileId);
   if (!profile) return;
 
   inputProfileName.value = profile.name;
   inputProfileName.disabled = profile.is_system_base;
-  btnDeleteProfile.style.display = profile.is_system_base ? "none" : "inline-block";
+  if (profile.is_system_base) {
+    btnDeleteProfile.classList.add("hidden");
+  } else {
+    btnDeleteProfile.classList.remove("hidden");
+  }
 
   if (profile.enabled) {
-    badgeActiveState.textContent = "활성 (적용 중)";
-    badgeActiveState.className = "badge active";
+    badgeActiveState.textContent = "적용 중";
+    badgeActiveState.className = "pill pill-live";
   } else {
     badgeActiveState.textContent = "비활성";
-    badgeActiveState.className = "badge";
+    badgeActiveState.className = "pill pill-neutral";
   }
 
   textarea.value = profile.content;
+  setDirty(false);
   updateLineNumbers();
   validateEditorContent();
 }
@@ -151,18 +235,18 @@ function renderPortMappings() {
     portMappingSummary.innerHTML = "";
     return;
   }
-  const proxyLabel = appState.proxy_running
-    ? `프록시(:${appState.proxy_port})`
-    : "포트 매핑";
-  portMappingSummary.innerHTML =
-    `<span>${proxyLabel}:</span>` +
-    statuses
-      .slice(0, 4)
-      .map((s) => {
-        const icon = s.alive ? "🟢" : "⚪";
-        return `<span class="port-pill" title="${s.alive ? "로컬 서버 응답 중" : "로컬 포트 닫혀 있음"}">${icon} ${s.mapping.domain} → :${s.mapping.target_port}</span>`;
-      })
-      .join("");
+  portMappingSummary.innerHTML = statuses
+    .slice(0, 4)
+    .map((s) => {
+      const dotClass = s.alive ? "status-dot live" : "status-dot";
+      const stateTitle = s.alive ? "로컬 포트 응답 중" : "로컬 포트 닫혀 있음";
+      return `<span class="route-chip mono num" title="${stateTitle}">
+        <span class="${dotClass}"></span>
+        <span>${s.mapping.domain}</span>
+        <span class="muted">:${s.mapping.target_port}</span>
+      </span>`;
+    })
+    .join("");
 }
 
 function updateLineNumbers() {
@@ -173,25 +257,37 @@ function updateLineNumbers() {
 async function validateEditorContent() {
   if (!invoke) return;
   const issues = await invoke("validate_hosts_text", { content: textarea.value });
-  if (issues.length === 0) {
-    validationSummary.innerHTML = `<span class="diag-ok">✓ 문법 이상 없음</span>`;
-  } else {
+  const conflicts = appState.preview?.conflicts || [];
+
+  if (issues.length > 0) {
     const first = issues[0];
-    validationSummary.innerHTML = `<span class="diag-err">⚠ ${first.line_number}번째 줄: ${first.reason} (외 ${issues.length - 1}건)</span>`;
+    validationSummary.className = "diag-status is-error";
+    validationSummary.innerHTML = `<span class="status-dot err"></span><span>${first.line_number}행 오류: ${first.reason}</span>`;
+  } else if (conflicts.length > 0) {
+    const firstConflict = conflicts[0];
+    validationSummary.className = "diag-status";
+    validationSummary.innerHTML = `<span class="status-dot"></span><span>중복 도메인 감지: ${firstConflict.domain} (${firstConflict.profiles.join(", ")})</span>`;
+  } else {
+    validationSummary.className = "diag-status";
+    validationSummary.innerHTML = `<span class="status-dot ok"></span><span>문법 정상</span>`;
   }
 }
 
-// Sync scroll & line numbers
+// Editor Events
 textarea.addEventListener("input", () => {
+  setDirty(true);
   updateLineNumbers();
   validateEditorContent();
+});
+
+inputProfileName.addEventListener("input", () => {
+  setDirty(true);
 });
 
 textarea.addEventListener("scroll", () => {
   lineNumbers.scrollTop = textarea.scrollTop;
 });
 
-// Keyboard shortcuts: Cmd + / (toggle comment) and Cmd + S (save)
 textarea.addEventListener("keydown", (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === "/") {
     e.preventDefault();
@@ -216,16 +312,11 @@ function toggleLineComments() {
   const allCommented = lines.every((l) => l.trim().startsWith("#"));
 
   const toggled = lines
-    .map((line) => {
-      if (allCommented) {
-        return line.replace(/^(\s*)#\s?/, "$1");
-      } else {
-        return `# ${line}`;
-      }
-    })
+    .map((line) => (allCommented ? line.replace(/^(\s*)#\s?/, "$1") : `# ${line}`))
     .join("\n");
 
   textarea.setRangeText(toggled, lineStart, lineEnd, "select");
+  setDirty(true);
   updateLineNumbers();
   validateEditorContent();
 }
@@ -235,36 +326,82 @@ async function saveCurrentProfile() {
   try {
     const snapshot = await invoke("update_profile", {
       id: selectedProfileId,
-      name: inputProfileName.value.trim() || "Untitled",
+      name: inputProfileName.value.trim() || "이름 없는 프로필",
       content: textarea.value,
       applyImmediately: true,
     });
     applySnapshot(snapshot);
+    showToast("저장 및 시스템 hosts 반영 완료");
   } catch (err) {
-    alert("저장 실패: " + err);
+    showToast(`저장 실패: ${err}`);
   }
 }
 
-// Button Event Listeners
-document.getElementById("btn-save-profile").onclick = saveCurrentProfile;
+// Quick Rule Adder Form
+document.getElementById("quick-add-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const ipField = document.getElementById("quick-ip");
+  const domainField = document.getElementById("quick-domain");
+  const commentField = document.getElementById("quick-comment");
 
-document.getElementById("btn-new-profile").onclick = async () => {
-  const name = prompt("새 프로필 이름을 입력하세요:", "새 로컬 프로젝트");
+  const ip = ipField.value.trim();
+  const domain = domainField.value.trim();
+  const comment = commentField.value.trim();
+  if (!ip || !domain) return;
+
+  const paddedIp = ip.padEnd(15, " ");
+  const newLine = comment ? `${paddedIp} ${domain} # ${comment}` : `${paddedIp} ${domain}`;
+  const current = textarea.value.trimEnd();
+  textarea.value = current ? `${current}\n${newLine}\n` : `${newLine}\n`;
+
+  domainField.value = "";
+  commentField.value = "";
+  updateLineNumbers();
+  validateEditorContent();
+  await saveCurrentProfile();
+};
+
+// Buttons & Dialog Wiring
+document.getElementById("btn-save-profile").onclick = saveCurrentProfile;
+document.getElementById("btn-toggle-comment").onclick = toggleLineComments;
+
+document.getElementById("btn-new-profile").onclick = () => {
+  newProfileNameInput.value = "";
+  dialogNewProfile.showModal();
+  newProfileNameInput.focus();
+};
+
+document.getElementById("btn-cancel-new").onclick = () => dialogNewProfile.close();
+document.getElementById("btn-close-new").onclick = () => dialogNewProfile.close();
+
+formNewProfile.onsubmit = async (e) => {
+  e.preventDefault();
+  const name = newProfileNameInput.value.trim();
   if (!name) return;
+  dialogNewProfile.close();
   const snapshot = await invoke("create_profile", {
     name,
     content: `# ${name}\n127.0.0.1       local.project.dev\n`,
   });
   selectedProfileId = snapshot.profiles[snapshot.profiles.length - 1].id;
   applySnapshot(snapshot);
+  showToast(`'${name}' 프로필이 생성되었습니다`);
 };
 
 btnDeleteProfile.onclick = async () => {
   if (!selectedProfileId) return;
-  if (!confirm("이 프로필을 삭제하시겠습니까?")) return;
+  const profile = appState.profiles.find((p) => p.id === selectedProfileId);
+  const confirmed = await askConfirm(
+    "프로필 삭제",
+    `'${profile?.name || ""}' 프로필을 삭제하시겠습니까? 삭제 후에는 되돌릴 수 없습니다.`,
+    "삭제"
+  );
+  if (!confirmed) return;
+
   const snapshot = await invoke("delete_profile", { id: selectedProfileId });
   selectedProfileId = snapshot.profiles[0]?.id || null;
   applySnapshot(snapshot);
+  showToast("프로필이 삭제되었습니다");
 };
 
 chkSingleMode.onchange = async () => {
@@ -272,85 +409,97 @@ chkSingleMode.onchange = async () => {
     singleMode: chkSingleMode.checked,
   });
   applySnapshot(snapshot);
+  showToast(chkSingleMode.checked ? "단일 전환 모드 켜짐" : "다중 병합 모드 켜짐");
 };
 
 btnGrantPerm.onclick = async () => {
   try {
     const snapshot = await invoke("grant_permission");
     applySnapshot(snapshot);
+    showToast("즉시 전환 권한이 활성화되었습니다");
   } catch (err) {
-    alert("권한 설정이 취소되었거나 실패했습니다: " + err);
+    showToast(`권한 설정 취소됨`);
   }
 };
 
 document.getElementById("btn-preview-merged").onclick = () => {
   mergedPreviewCode.textContent = appState.preview?.hosts_content || "";
-  modalPreview.classList.remove("hidden");
+  dialogPreview.showModal();
 };
 
-document.getElementById("btn-close-modal").onclick = () => {
-  modalPreview.classList.add("hidden");
-};
+document.getElementById("btn-close-preview").onclick = () => dialogPreview.close();
 
-document.getElementById("btn-panic-restore").onclick = async () => {
-  if (!confirm("원본 /etc/hosts 백업 파일로 즉시 복구하시겠습니까?")) return;
-  try {
-    const snapshot = await invoke("panic_restore");
-    applySnapshot(snapshot);
-    alert("원본 /etc/hosts 상태로 안전하게 복구되었습니다.");
-  } catch (err) {
-    alert("복구 실패: " + err);
+document.getElementById("btn-copy-preview").onclick = async () => {
+  const text = appState.preview?.hosts_content || "";
+  if (navigator.clipboard) {
+    await navigator.clipboard.writeText(text);
+    showToast("병합된 hosts 내용이 클립보드에 복사되었습니다");
   }
 };
 
+document.getElementById("btn-panic-restore").onclick = async () => {
+  const confirmed = await askConfirm(
+    "원본 백업으로 복구",
+    "앱 최초 실행 시 백업해 둔 원본 /private/etc/hosts 파일로 즉시 복구하시겠습니까?",
+    "원본 복구"
+  );
+  if (!confirmed) return;
+  try {
+    const snapshot = await invoke("panic_restore");
+    applySnapshot(snapshot);
+    showToast("원본 /etc/hosts 파일로 안전하게 복구되었습니다");
+  } catch (err) {
+    showToast(`복구 실패: ${err}`);
+  }
+};
+
+// Updater
 function showUpdateBanner(info) {
   pendingUpdate = info;
-  updateText.textContent = `🎉 새 버전 v${info.latest_version} 출시!`;
+  updateText.textContent = `새 버전 v${info.latest_version} 출시`;
   updateBanner.classList.remove("hidden");
 }
 
 async function checkForUpdateManual(silentIfLatest = false) {
   if (!invoke) return;
   try {
-    btnCheckUpdate.textContent = "🔄 버전 확인 중...";
     btnCheckUpdate.disabled = true;
     const info = await invoke("check_update");
     if (info.update_available) {
       showUpdateBanner(info);
       if (!silentIfLatest) {
-        if (confirm(`새로운 버전(v${info.latest_version})이 있습니다!\n지금 바로 다운로드하여 자동 업데이트하시겠습니까?`)) {
-          await triggerInstallUpdate();
-        }
+        const ok = await askConfirm(
+          `새 버전 v${info.latest_version} 업데이트`,
+          `현재 버전(v${info.current_version})보다 새로운 버전이 출시되었습니다. 지금 자동으로 다운로드하여 설치하고 앱을 재시작하시겠습니까?`,
+          "지금 업데이트"
+        );
+        if (ok) await triggerInstallUpdate();
       }
     } else if (!silentIfLatest) {
-      alert(`현재 최신 버전(v${info.current_version})을 사용 중입니다.`);
+      showToast(`현재 최신 버전(v${info.current_version})을 사용 중입니다`);
     }
   } catch (err) {
     if (!silentIfLatest) {
-      alert("업데이트 확인 실패: " + err);
+      showToast(`업데이트 확인 실패: ${err}`);
     }
   } finally {
-    btnCheckUpdate.textContent = "🔄 GitHub 신규 버전 확인";
     btnCheckUpdate.disabled = false;
   }
 }
 
 async function triggerInstallUpdate() {
-  if (!pendingUpdate) return;
-  if (!pendingUpdate.download_url || !pendingUpdate.asset_name) {
-    alert("릴리즈 페이지에서 설치 파일을 다운로드해 주세요: " + pendingUpdate.release_url);
-    return;
-  }
+  if (!pendingUpdate || !pendingUpdate.download_url || !pendingUpdate.asset_name) return;
   try {
     btnInstallUpdate.textContent = "설치 중...";
     btnInstallUpdate.disabled = true;
+    showToast("업데이트 패키지 다운로드 및 설치 중...");
     await invoke("install_update", {
       downloadUrl: pendingUpdate.download_url,
       assetName: pendingUpdate.asset_name,
     });
   } catch (err) {
-    alert("자동 업데이트 실패: " + err);
-    btnInstallUpdate.textContent = "자동 업데이트";
+    showToast(`자동 업데이트 실패: ${err}`);
+    btnInstallUpdate.textContent = "업데이트";
     btnInstallUpdate.disabled = false;
   }
 }
@@ -361,13 +510,9 @@ btnInstallUpdate.onclick = triggerInstallUpdate;
 if (listen) {
   listen("profiles-updated", () => loadSnapshot());
   listen("update-available", (event) => {
-    if (event.payload) {
-      showUpdateBanner(event.payload);
-    }
+    if (event.payload) showUpdateBanner(event.payload);
   });
-  listen("trigger-update-check", () => {
-    checkForUpdateManual(false);
-  });
+  listen("trigger-update-check", () => checkForUpdateManual(false));
 }
 
 window.addEventListener("DOMContentLoaded", loadSnapshot);

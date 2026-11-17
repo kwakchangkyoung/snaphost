@@ -7,94 +7,245 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="app-shell">
-    <!-- Left Sidebar: Profile List & Switch Mode -->
-    <aside class="sidebar">
-      <div class="brand-header">
-        <div class="brand-title">
-          <span class="bolt">⚡</span>
-          <div>
-            <h1>SnapHost <span id="app-version" class="version-tag">v0.1.0</span></h1>
-            <p class="subtitle">Apple Silicon Hosts Engine</p>
+  <div class="shell">
+    <!-- Left Sidebar: Open-Plane Profile Ledger (256px) -->
+    <aside class="sidebar" aria-label="프로필 목록 및 시스템 상태">
+      <div class="sidebar-top">
+        <div class="brand-row">
+          <div class="brand-identity">
+            <svg class="icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M9.5 1.5L3.5 9h4.5l-1.5 5.5L12.5 7H8l1.5-5.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+            </svg>
+            <span class="brand-name">SnapHost</span>
+            <span id="app-version" class="version-pill num">v0.1.0</span>
           </div>
+          <button id="btn-new-profile" type="button" class="btn btn-secondary btn-compact">
+            <svg class="icon-sm" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+            </svg>
+            <span>새 프로필</span>
+          </button>
         </div>
-        <button id="btn-new-profile" class="btn btn-primary btn-sm" title="새 프로필 추가">+ 추가</button>
+
+        <!-- One-line Ledger Answer: What is active right now? -->
+        <p id="ledger-summary" class="ledger-summary num">활성 1개 · 도메인 0건 · 프록시 0건</p>
       </div>
 
-      <div class="mode-bar">
-        <label class="mode-toggle">
-          <input type="checkbox" id="chk-single-mode" />
-          <span>단일 전환 모드 (Gas Mask 방식)</span>
+      <div class="mode-row">
+        <label class="mode-switch-label" for="chk-single-mode">
+          <span>단일 전환 모드 (Gas Mask)</span>
+          <span class="switch">
+            <input type="checkbox" id="chk-single-mode" />
+            <span class="slider"></span>
+          </span>
         </label>
       </div>
 
-      <ul id="profile-list" class="profile-list"></ul>
+      <div class="nav-group-header">
+        <span class="group-label">호스트 프로필</span>
+      </div>
+
+      <ul id="profile-list" class="profile-list" role="listbox" aria-label="프로필 목록"></ul>
 
       <div class="sidebar-footer">
-        <div id="update-banner" class="update-banner hidden">
-          <span id="update-text">🎉 새 버전 출시!</span>
-          <button id="btn-install-update" class="btn btn-xs btn-success">자동 업데이트</button>
+        <div id="update-banner" class="update-banner hidden" role="status">
+          <div class="update-info">
+            <svg class="icon-sm" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M8 2v8m0 0L5 7m3 3l3-3M3 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <span id="update-text" class="num">새 버전 출시</span>
+          </div>
+          <button id="btn-install-update" type="button" class="btn btn-primary btn-compact">업데이트</button>
         </div>
-        <div id="perm-banner" class="perm-status">
-          <span id="perm-dot" class="dot"></span>
-          <span id="perm-text">권한 확인 중...</span>
-          <button id="btn-grant-perm" class="btn btn-xs">1회 권한 부여</button>
+
+        <div id="perm-banner" class="perm-card">
+          <span id="perm-dot" class="status-dot" aria-hidden="true"></span>
+          <span id="perm-text" class="perm-label">권한 확인 중</span>
+          <button id="btn-grant-perm" type="button" class="btn btn-secondary btn-compact">권한 설정</button>
         </div>
-        <div class="footer-actions">
-          <button id="btn-preview-merged" class="btn btn-secondary btn-block">🔍 최종 병합된 /etc/hosts 미리보기</button>
-          <button id="btn-check-update" class="btn btn-secondary btn-block">🔄 GitHub 신규 버전 확인</button>
-          <button id="btn-panic-restore" class="btn btn-danger-ghost btn-block">🛡️ 원본 백업으로 긴급 복구</button>
-        </div>
+
+        <nav class="utility-nav" aria-label="도구 및 복구">
+          <button id="btn-preview-merged" type="button" class="utility-btn">
+            <svg class="icon-sm" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+            </svg>
+            <span>병합된 hosts 미리보기</span>
+          </button>
+          <button id="btn-check-update" type="button" class="utility-btn">
+            <svg class="icon-sm" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <span>신규 버전 확인</span>
+          </button>
+          <button id="btn-panic-restore" type="button" class="utility-btn utility-danger">
+            <svg class="icon-sm" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M8 2L2.5 4.5v4c0 3.2 2.3 5.2 5.5 6 3.2-.8 5.5-2.8 5.5-6v-4L8 2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+            </svg>
+            <span>원본 백업으로 복구</span>
+          </button>
+        </nav>
       </div>
     </aside>
 
-    <!-- Right Main Area: Editor & Diagnostics -->
-    <main class="editor-pane">
-      <header class="editor-header">
-        <div class="profile-meta">
-          <input id="input-profile-name" type="text" class="profile-name-input" placeholder="프로필 이름" />
-          <span id="badge-active-state" class="badge">비활성</span>
+    <!-- Right Main Canvas: Open-Plane Profile Workspace -->
+    <main class="canvas">
+      <header class="canvas-header">
+        <div class="title-group">
+          <h1 id="heading-profile-title" class="sr-only">프로필 편집</h1>
+          <input
+            id="input-profile-name"
+            type="text"
+            class="title-input"
+            aria-label="프로필 이름"
+            placeholder="프로필 이름"
+          />
+          <span id="badge-active-state" class="pill pill-neutral">비활성</span>
+          <span id="badge-dirty-state" class="pill pill-warning hidden">수정됨</span>
         </div>
-        <div class="editor-actions">
-          <span class="shortcut-hint">주석 토글: <kbd>⌘</kbd>+<kbd>/</kbd> · 저장: <kbd>⌘</kbd>+<kbd>S</kbd></span>
-          <button id="btn-delete-profile" class="btn btn-danger-outline btn-sm">삭제</button>
-          <button id="btn-save-profile" class="btn btn-primary btn-sm">저장 및 즉시 반영</button>
+
+        <div class="header-actions">
+          <button id="btn-toggle-comment" type="button" class="btn btn-secondary" title="선택 줄 주석 토글 (⌘/)">
+            <span>주석 토글</span>
+            <kbd class="kbd num">⌘/</kbd>
+          </button>
+          <button id="btn-delete-profile" type="button" class="btn btn-secondary btn-danger-text">
+            <span>삭제</span>
+          </button>
+          <button id="btn-save-profile" type="button" class="btn btn-primary">
+            <span>저장 및 반영</span>
+            <kbd class="kbd kbd-on-primary num">⌘S</kbd>
+          </button>
         </div>
       </header>
 
-      <div class="editor-workspace">
-        <div class="line-numbers" id="line-numbers">1</div>
-        <textarea
-          id="hosts-textarea"
-          class="hosts-textarea"
-          spellcheck="false"
-          autocomplete="off"
-          autocorrect="off"
-          autocapitalize="off"
-          placeholder="# 예시:&#10;127.0.0.1       local.myapp.dev&#10;127.0.0.1:3000  web.myapp.dev # 포트 직접 매핑"
-        ></textarea>
-      </div>
-
-      <!-- Bottom Status / Port Mappings & Validation Bar -->
-      <footer class="diagnostics-bar">
-        <div id="validation-summary" class="diag-section">
-          <span class="diag-ok">✓ 문법 이상 없음</span>
+      <!-- Signature Element: Quick Host / Port Rule Entry Bar -->
+      <form id="quick-add-form" class="quick-entry-bar" autocomplete="off">
+        <div class="quick-field">
+          <label for="quick-ip" class="quick-label">대상 주소 (IP 또는 IP:PORT)</label>
+          <input
+            id="quick-ip"
+            type="text"
+            class="quick-input mono num"
+            placeholder="127.0.0.1:3000"
+            value="127.0.0.1"
+            required
+          />
         </div>
-        <div id="port-mapping-summary" class="diag-section"></div>
-      </footer>
+        <div class="quick-field quick-field-grow">
+          <label for="quick-domain" class="quick-label">연결할 로컬 도메인</label>
+          <input
+            id="quick-domain"
+            type="text"
+            class="quick-input mono"
+            placeholder="api.myapp.local"
+            required
+          />
+        </div>
+        <div class="quick-field">
+          <label for="quick-comment" class="quick-label">메모 (선택)</label>
+          <input
+            id="quick-comment"
+            type="text"
+            class="quick-input"
+            placeholder="로컬 API 서버"
+          />
+        </div>
+        <button type="submit" class="btn btn-secondary quick-submit">
+          <svg class="icon-sm" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+          </svg>
+          <span>줄 추가</span>
+        </button>
+      </form>
+
+      <!-- Editor Surface Card -->
+      <section class="editor-card" aria-label="호스트 매핑 코드 편집기">
+        <div class="workspace-scroll">
+          <div class="line-numbers mono num" id="line-numbers" aria-hidden="true">1</div>
+          <textarea
+            id="hosts-textarea"
+            class="hosts-textarea mono"
+            spellcheck="false"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            aria-label="호스트 설정 본문"
+            placeholder="# 예시:&#10;127.0.0.1       local.myapp.dev&#10;127.0.0.1:3000  web.myapp.dev # 포트 직접 매핑"
+          ></textarea>
+        </div>
+
+        <!-- Bottom Diagnostics & Live Route Strip -->
+        <footer class="ledger-footer">
+          <div id="validation-summary" class="diag-status">
+            <span class="status-dot ok" aria-hidden="true"></span>
+            <span>문법 정상</span>
+          </div>
+          <div id="port-mapping-summary" class="route-strip"></div>
+        </footer>
+      </section>
     </main>
   </div>
 
-  <!-- Modal for Merged Preview -->
-  <div id="modal-preview" class="modal hidden">
-    <div class="modal-card">
-      <div class="modal-header">
-        <h2>최종 병합된 <code>/private/etc/hosts</code> 미리보기</h2>
-        <button id="btn-close-modal" class="btn btn-sm">닫기</button>
+  <!-- Native Dialog 1: Create New Profile -->
+  <dialog id="dialog-new-profile" class="dialog">
+    <form id="form-new-profile" method="dialog" class="dialog-panel">
+      <div class="dialog-header">
+        <h2>새 프로필 만들기</h2>
+        <button type="button" id="btn-cancel-new" class="btn btn-secondary btn-compact">닫기</button>
       </div>
-      <pre id="merged-preview-code" class="preview-code"></pre>
+      <div class="dialog-body">
+        <label for="new-profile-name" class="field-label">프로필 이름</label>
+        <input
+          id="new-profile-name"
+          type="text"
+          class="field-input"
+          placeholder="예: 사내 스테이징 서버, 로컬 웹 프로젝트"
+          required
+        />
+        <p class="field-help">생성 후 우측 편집기에서 도메인과 포트 매핑 규칙을 자유롭게 수정할 수 있습니다.</p>
+      </div>
+      <div class="dialog-footer">
+        <button type="button" id="btn-close-new" class="btn btn-secondary">취소</button>
+        <button type="submit" class="btn btn-primary">만들기</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Native Dialog 2: Confirmation Modal (Delete / Restore / Update) -->
+  <dialog id="dialog-confirm" class="dialog">
+    <div class="dialog-panel">
+      <div class="dialog-header">
+        <h2 id="confirm-title">확인</h2>
+      </div>
+      <div class="dialog-body">
+        <p id="confirm-message" class="confirm-text"></p>
+      </div>
+      <div class="dialog-footer">
+        <button type="button" id="btn-confirm-cancel" class="btn btn-secondary">취소</button>
+        <button type="button" id="btn-confirm-ok" class="btn btn-primary">확인</button>
+      </div>
     </div>
-  </div>
+  </dialog>
+
+  <!-- Native Dialog 3: Merged /etc/hosts Preview -->
+  <dialog id="dialog-preview" class="dialog dialog-wide">
+    <div class="dialog-panel">
+      <div class="dialog-header">
+        <div>
+          <h2>병합된 시스템 호스트 미리보기</h2>
+          <p class="field-help mono">/private/etc/hosts</p>
+        </div>
+        <div class="header-actions">
+          <button type="button" id="btn-copy-preview" class="btn btn-secondary btn-compact">복사</button>
+          <button type="button" id="btn-close-preview" class="btn btn-primary btn-compact">닫기</button>
+        </div>
+      </div>
+      <pre id="merged-preview-code" class="preview-code mono num"></pre>
+    </div>
+  </dialog>
+
+  <!-- Non-blocking Toast Feedback -->
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
   <script src="app.js"></script>
 </body>

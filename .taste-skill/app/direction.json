@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "kind": "app",
+  "style": {
+    "id": "achromatic-ledger",
+    "name": "Achromatic ledger",
+    "suits": ["devtools", "workspace", "builder"],
+    "colourBudget": "under 1% coloured pixels; the chrome is ink, the one chart hue (#1d5fbf / #6f9cf0) marks active profile & live proxy state, and positive/negative signals mark syntax validation or port health.",
+    "tokens": {
+      "ground": "#f2f4f7",
+      "surface": "#ffffff",
+      "raised": "#eef0f4",
+      "border": "#e2e5ea",
+      "rule": "#eceef2",
+      "text": "#0a0a0a",
+      "muted": "#5f6672",
+      "accent": "#141414",
+      "hue": "#1d5fbf",
+      "positive": "#2e7d32",
+      "negative": "#c4242a",
+      "warning": "#92400e",
+      "radius": {
+        "card": 8,
+        "control": 6,
+        "chip": 4
+      },
+      "font": {
+        "family": "Pretendard Variable, Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif",
+        "mono": "SF Mono, Geist Mono, JetBrains Mono, Menlo, monospace",
+        "sizes": {
+          "title": 24,
+          "section": 16,
+          "body": 14,
+          "code": 13,
+          "small": 12
+        }
+      },
+      "sidebarWidth": 256,
+      "controlHeight": 36,
+      "rowHeight": 40
+    }
+  },
+  "shell": {
+    "id": "open-plane",
+    "sidebarWidth": 256,
+    "separation": "1px hairline",
+    "topBar": "none"
+  }
+}
