@@ -122,8 +122,12 @@ fn update_profile(
             .update_profile(&id, name, content)
             .map_err(|e| e.to_string())?;
 
-        if apply_immediately && updated.enabled {
-            mgr.apply_to_system().map_err(|e| e.to_string())?;
+        if apply_immediately {
+            if !updated.enabled {
+                mgr.toggle_profile(&id, true).map_err(|e| e.to_string())?;
+            } else {
+                mgr.apply_to_system().map_err(|e| e.to_string())?;
+            }
         }
     }
 

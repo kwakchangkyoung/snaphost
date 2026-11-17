@@ -2,6 +2,7 @@ use crate::parser::{HostsLine, PortMapping, ValidationIssue, parse_hosts};
 use crate::profile::Profile;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::net::{IpAddr, Ipv4Addr};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MergeResult {
@@ -34,13 +35,33 @@ pub fn merge_profiles(profiles: &[Profile]) -> MergeResult {
     let mut domain_sources: HashMap<String, Vec<String>> = HashMap::new();
     let mut validation_issues = Vec::new();
 
-    for profile in profiles.iter().filter(|p| p.enabled) {
+    // Pre-scan all enabled profiles to see which domains already have explicit IPv6 mappings
+    let mut ipv6_mapped_domains: HashSet<String> = HashSet::new();
+    let parsed_profiles: Vec<(&Profile, Vec<HostsLine>)> = profiles
+        .iter()
+        .filter(|p| p.enabled)
+        .map(|p| {
+            let lines = parse_hosts(&p.content);
+            for line in &lines {
+                if let HostsLine::Entry(entry) = line {
+                    if entry.ip.is_ipv6() {
+                        for d in &entry.domains {
+                            ipv6_mapped_domains.insert(d.to_lowercase());
+                        }
+                    }
+                }
+            }
+            (p, lines)
+        })
+        .collect();
+
+    for (profile, lines) in parsed_profiles {
         output.push_str(&format!(
             "# --- [Profile: {}] ---\n",
             profile.name
         ));
 
-        for line in parse_hosts(&profile.content) {
+        for line in lines {
             match line {
                 HostsLine::Empty => output.push('\n'),
                 HostsLine::Comment(comment) => {
@@ -75,6 +96,34 @@ pub fn merge_profiles(profiles: &[Profile]) -> MergeResult {
                         }
                         (None, None) => {
                             output.push_str(&format!("{:<15} {}\n", ip_display, domains_joined));
+                        }
+                    }
+
+                    // Auto-mirror 127.0.0.1 loopback entries to ::1 (IPv6) if not explicitly mapped,
+                    // preventing macOS/browsers from waiting on upstream AAAA lookups or bypassing /etc/hosts via IPv6.
+                    if entry.ip == IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)) {
+                        let ipv6_domains: Vec<&str> = entry
+                            .domains
+                            .iter()
+                            .filter_map(|d| {
+                                let lower = d.to_lowercase();
+                                if lower != "localhost"
+                                    && lower != "broadcasthost"
+                                    && ipv6_mapped_domains.insert(lower)
+                                {
+                                    Some(d.as_str())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
+
+                        if !ipv6_domains.is_empty() {
+                            output.push_str(&format!(
+                                "{:<15} {}\n",
+                                "::1",
+                                ipv6_domains.join(" ")
+                            ));
                         }
                     }
 
@@ -147,6 +196,7 @@ mod tests {
 
         let result = merge_profiles(&[p1, p2]);
         assert!(result.hosts_content.contains("127.0.0.1       web.dev.local # [SnapHost -> :3000]"));
+        assert!(result.hosts_content.contains("::1             web.dev.local"));
         assert!(result.hosts_content.contains("fe80::1%lo0     localhost"));
         assert_eq!(result.port_mappings.len(), 2);
         assert_eq!(result.conflicts.len(), 1);

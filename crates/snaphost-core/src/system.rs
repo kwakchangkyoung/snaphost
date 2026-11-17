@@ -2,12 +2,14 @@ use crate::merger::{MergeResult, merge_profiles};
 use crate::profile::Profile;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use thiserror::Error;
 use uuid::Uuid;
 
 pub const ETC_HOSTS_PATH: &str = "/private/etc/hosts";
+pub const SUDOERS_SNAPHOST_PATH: &str = "/private/etc/sudoers.d/snaphost";
 
 #[derive(Debug, Error)]
 pub enum SnapHostError {
@@ -141,8 +143,13 @@ impl SnapHostManager {
     }
 
     pub fn status(&self) -> SystemStatus {
+        let sudoers_ok = if self.hosts_path == Path::new(ETC_HOSTS_PATH) {
+            Path::new(SUDOERS_SNAPHOST_PATH).exists()
+        } else {
+            true
+        };
         SystemStatus {
-            hosts_writable: is_file_writable(&self.hosts_path),
+            hosts_writable: is_file_writable(&self.hosts_path) && sudoers_ok,
             has_original_backup: self.data_dir.join("original_hosts.bak").exists(),
             app_data_dir: self.data_dir.display().to_string(),
             etc_hosts_path: self.hosts_path.display().to_string(),
@@ -256,23 +263,37 @@ impl SnapHostManager {
     }
 
     /// Request one-time macOS administrator privilege so `/private/etc/hosts` becomes writable by the current user
-    /// for instant 0ms switching without repeated password prompts.
+    /// and `/private/etc/sudoers.d/snaphost` allows passwordless `mDNSResponder` DNS cache flush for instant 0ms switching.
     pub fn grant_one_time_permission(&self) -> Result<(), SnapHostError> {
         let user = sanitized_username();
         let target = escape_for_applescript_shell(&self.hosts_path.display().to_string());
+        let sudoers_staged_path =
+            std::env::temp_dir().join(format!("snaphost_sudoers_{}", Uuid::new_v4()));
+        let sudoers_rule = format!(
+            "# SnapHost passwordless DNS cache flush\n{user} ALL=(root) NOPASSWD: /usr/bin/killall -HUP mDNSResponder, /usr/bin/dscacheutil -flushcache\n"
+        );
+        fs::write(&sudoers_staged_path, sudoers_rule)?;
+        let staged_sudoers =
+            escape_for_applescript_shell(&sudoers_staged_path.display().to_string());
+        let sudoers_dest = escape_for_applescript_shell(SUDOERS_SNAPHOST_PATH);
+
         let script = format!(
-            "do shell script \"chown {user}:staff '{target}' && chmod 644 '{target}'\" with administrator privileges"
+            "do shell script \"chown {user}:staff '{target}' && chmod 644 '{target}' && mkdir -p /private/etc/sudoers.d && cp '{staged_sudoers}' '{sudoers_dest}' && chown root:wheel '{sudoers_dest}' && chmod 440 '{sudoers_dest}' && (/usr/sbin/visudo -cf '{sudoers_dest}' >/dev/null 2>&1 || rm -f '{sudoers_dest}')\" with administrator privileges"
         );
 
         let output = Command::new("osascript")
             .arg("-e")
             .arg(&script)
-            .output()?;
+            .output();
+
+        let _ = fs::remove_file(&sudoers_staged_path);
+        let output = output?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
             return Err(SnapHostError::PrivilegeError(stderr));
         }
+        let _ = flush_dns_cache();
         Ok(())
     }
 
@@ -308,9 +329,17 @@ pub(crate) fn escape_for_applescript_shell(input: &str) -> String {
 }
 
 fn write_hosts_content(hosts_path: &Path, content: &str) -> Result<(), SnapHostError> {
-    // 1. Fast path: direct write if user already has write access
-    if fs::write(hosts_path, content).is_ok() {
-        return Ok(());
+    // 1. Fast path: direct write + fsync if user already has write access
+    if let Ok(mut file) = fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .create(true)
+        .open(hosts_path)
+    {
+        if file.write_all(content.as_bytes()).is_ok() {
+            let _ = file.sync_all();
+            return Ok(());
+        }
     }
 
     // 2. Fallback: write unique temp file and copy via osascript administrator prompt
@@ -321,17 +350,29 @@ fn write_hosts_content(hosts_path: &Path, content: &str) -> Result<(), SnapHostE
     let target = escape_for_applescript_shell(&hosts_path.display().to_string());
     let staged = escape_for_applescript_shell(&tmp_path.display().to_string());
 
-    // Also grant ownership during fallback so subsequent switches are instant (0ms)
+    let sudoers_staged_path =
+        std::env::temp_dir().join(format!("snaphost_sudoers_{}", Uuid::new_v4()));
+    let sudoers_rule = format!(
+        "# SnapHost passwordless DNS cache flush\n{user} ALL=(root) NOPASSWD: /usr/bin/killall -HUP mDNSResponder, /usr/bin/dscacheutil -flushcache\n"
+    );
+    let _ = fs::write(&sudoers_staged_path, sudoers_rule);
+    let staged_sudoers =
+        escape_for_applescript_shell(&sudoers_staged_path.display().to_string());
+    let sudoers_dest = escape_for_applescript_shell(SUDOERS_SNAPHOST_PATH);
+
+    // Also grant ownership + sudoers rule during fallback so subsequent switches and DNS flushes are instant (0ms)
     let script = format!(
-        "do shell script \"cp '{staged}' '{target}' && chown {user}:staff '{target}' && chmod 644 '{target}'\" with administrator privileges"
+        "do shell script \"cp '{staged}' '{target}' && chown {user}:staff '{target}' && chmod 644 '{target}' && mkdir -p /private/etc/sudoers.d && cp '{staged_sudoers}' '{sudoers_dest}' && chown root:wheel '{sudoers_dest}' && chmod 440 '{sudoers_dest}' && (/usr/sbin/visudo -cf '{sudoers_dest}' >/dev/null 2>&1 || rm -f '{sudoers_dest}')\" with administrator privileges"
     );
 
     let output = Command::new("osascript")
         .arg("-e")
         .arg(&script)
-        .output()?;
+        .output();
 
     let _ = fs::remove_file(&tmp_path);
+    let _ = fs::remove_file(&sudoers_staged_path);
+    let output = output?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -346,8 +387,18 @@ pub fn flush_dns_cache() -> Result<(), SnapHostError> {
     let _ = Command::new("/usr/bin/dscacheutil")
         .arg("-flushcache")
         .output();
-    let _ = Command::new("/usr/bin/killall")
-        .args(["-HUP", "mDNSResponder"])
+    let _ = Command::new("/usr/bin/sudo")
+        .args(["-n", "/usr/bin/dscacheutil", "-flushcache"])
         .output();
+
+    // Send SIGHUP to mDNSResponder via passwordless sudo if configured, falling back to direct call
+    let sudo_hup = Command::new("/usr/bin/sudo")
+        .args(["-n", "/usr/bin/killall", "-HUP", "mDNSResponder"])
+        .output();
+    if !sudo_hup.map(|o| o.status.success()).unwrap_or(false) {
+        let _ = Command::new("/usr/bin/killall")
+            .args(["-HUP", "mDNSResponder"])
+            .output();
+    }
     Ok(())
 }
