@@ -37,7 +37,7 @@
   --radius-control: 6px;
   --radius-chip: 4px;
 
-  --sidebar-width: 280px;
+  --sidebar-width: 256px;
   --control-height: 36px;
   --row-height: 40px;
 
@@ -141,8 +141,10 @@ body {
 /* Open-Plane Shell */
 .shell {
   display: grid;
-  grid-template-columns: var(--sidebar-width) 1fr;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  width: 100vw;
   height: 100vh;
+  overflow: hidden;
 }
 
 /* Sidebar */
@@ -213,6 +215,10 @@ body {
 }
 
 .nav-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding: 16px 8px 6px;
 }
 
@@ -258,18 +264,6 @@ body {
   gap: 8px;
   min-width: 0;
   flex: 1;
-}
-
-.profile-active-bar {
-  width: 3px;
-  height: 14px;
-  border-radius: 2px;
-  background: transparent;
-  flex-shrink: 0;
-}
-
-.profile-item.is-enabled .profile-active-bar {
-  background: var(--hue);
 }
 
 .profile-name {
@@ -432,6 +426,7 @@ input:checked + .slider::before {
 .canvas {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   height: 100vh;
   padding: 24px 28px 20px;
   gap: 14px;
@@ -443,12 +438,13 @@ input:checked + .slider::before {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  min-width: 0;
 }
 
 .title-group {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
   flex: 1;
 }
@@ -463,10 +459,11 @@ input:checked + .slider::before {
   font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 32px;
-  padding: 2px 8px;
-  margin-left: -8px;
-  min-width: 140px;
-  max-width: 440px;
+  padding: 2px 6px;
+  margin-left: -6px;
+  flex: 0 1 auto;
+  min-width: 0;
+  text-overflow: ellipsis;
 }
 
 .title-input:hover:not(:disabled) {
@@ -515,9 +512,12 @@ input:checked + .slider::before {
 /* Quick Rule Entry Bar */
 .quick-entry-bar {
   display: grid;
-  grid-template-columns: 190px minmax(180px, 1fr) 190px auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 1fr) auto;
+  grid-template-areas: "ip domain memo submit";
   align-items: end;
   gap: 10px;
+  width: 100%;
+  min-width: 0;
   padding: 12px 14px;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -531,15 +531,30 @@ input:checked + .slider::before {
   min-width: 0;
 }
 
+.qf-ip {
+  grid-area: ip;
+}
+
+.qf-domain {
+  grid-area: domain;
+}
+
+.qf-memo {
+  grid-area: memo;
+}
+
 .quick-label {
   font-size: var(--fs-small);
   font-weight: 500;
   color: var(--muted);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .quick-input {
   width: 100%;
+  min-width: 0;
   height: var(--control-height);
   padding: 0 10px;
   background: var(--ground);
@@ -557,6 +572,8 @@ input:checked + .slider::before {
 
 .quick-submit {
   height: var(--control-height);
+  flex-shrink: 0;
+  grid-area: submit;
 }
 
 /* Editor Surface Card */
@@ -579,7 +596,9 @@ input:checked + .slider::before {
 }
 
 .line-numbers {
-  width: 48px;
+  min-width: 48px;
+  width: auto;
+  flex-shrink: 0;
   padding: 16px 10px;
   text-align: right;
   font-size: var(--fs-code);
@@ -614,6 +633,9 @@ input:checked + .slider::before {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  overflow: hidden;
   font-size: var(--fs-small);
 }
 
@@ -622,6 +644,11 @@ input:checked + .slider::before {
   align-items: center;
   gap: 7px;
   color: var(--muted);
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .diag-status.is-error {
@@ -633,6 +660,9 @@ input:checked + .slider::before {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 60%;
   overflow-x: auto;
 }
 
@@ -640,12 +670,18 @@ input:checked + .slider::before {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  flex-shrink: 0;
   padding: 2px 8px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-chip);
   font-size: var(--fs-small);
   color: var(--text);
+  white-space: nowrap;
+}
+
+.route-chip .muted {
+  color: var(--muted);
 }
 
 /* Buttons (Ink Primary & Neutral Secondary) */
@@ -823,6 +859,19 @@ input:checked + .slider::before {
 
 .hidden {
   display: none !important;
+}
+
+@media (max-width: 960px) {
+  .header-actions .kbd {
+    display: none;
+  }
+
+  .quick-entry-bar {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    grid-template-areas:
+      "ip domain domain"
+      "memo memo submit";
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

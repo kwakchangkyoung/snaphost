@@ -12,6 +12,7 @@ let appState = {
   proxy_port: 80,
 };
 let selectedProfileId = null;
+let editorProfileId = null;
 let isDirty = false;
 let pendingUpdate = null;
 let toastTimer = null;
@@ -137,8 +138,17 @@ function renderSidebar() {
     li.setAttribute("role", "option");
     li.setAttribute("aria-selected", profile.id === selectedProfileId ? "true" : "false");
 
-    li.onclick = (e) => {
+    li.onclick = async (e) => {
       if (e.target.tagName === "INPUT" || e.target.classList.contains("slider")) return;
+      if (isDirty && profile.id !== selectedProfileId) {
+        const ok = await askConfirm(
+          "저장하지 않은 변경 사항",
+          "현재 프로필의 변경 사항이 저장되지 않았습니다. 저장하지 않고 이동하시겠습니까?",
+          "저장하지 않고 이동"
+        );
+        if (!ok) return;
+        setDirty(false);
+      }
       selectedProfileId = profile.id;
       renderSidebar();
       renderSelectedProfile();
@@ -147,15 +157,12 @@ function renderSidebar() {
     const left = document.createElement("div");
     left.className = "profile-left";
 
-    const bar = document.createElement("span");
-    bar.className = "profile-active-bar";
-    left.appendChild(bar);
-
     const nameSpan = document.createElement("span");
     nameSpan.className = "profile-name";
     nameSpan.textContent = profile.is_system_base
       ? profile.name.replace(/\s*\(Base\)$/i, "")
       : profile.name;
+    nameSpan.title = profile.name;
     left.appendChild(nameSpan);
 
     if (profile.is_system_base) {
@@ -205,23 +212,26 @@ function setDirty(dirty) {
   }
 }
 
+const titleMeasureCanvas = document.createElement("canvas");
+
 function syncTitleInputWidth() {
   const val = inputProfileName.value || inputProfileName.placeholder || "";
-  // Korean characters take ~1.8ch, ASCII ~1ch
-  let widthCh = 2;
-  for (const ch of val) {
-    widthCh += ch.charCodeAt(0) > 127 ? 1.85 : 1.02;
+  const ctx = titleMeasureCanvas.getContext("2d");
+  if (ctx) {
+    const computed = window.getComputedStyle(inputProfileName);
+    ctx.font = `${computed.fontWeight} ${computed.fontSize} ${computed.fontFamily}`;
+    const letterSpacing = parseFloat(computed.letterSpacing) || 0;
+    const textWidth = Math.ceil(ctx.measureText(val).width + letterSpacing * val.length);
+    inputProfileName.style.width = `${Math.max(textWidth + 16, 60)}px`;
   }
-  inputProfileName.style.width = `${Math.min(Math.max(widthCh, 10), 34)}ch`;
 }
 
 function renderSelectedProfile() {
   const profile = appState.profiles.find((p) => p.id === selectedProfileId);
   if (!profile) return;
 
-  inputProfileName.value = profile.name;
+  inputProfileName.title = profile.name;
   inputProfileName.disabled = profile.is_system_base;
-  syncTitleInputWidth();
   if (profile.is_system_base) {
     btnDeleteProfile.classList.add("hidden");
   } else {
@@ -236,8 +246,13 @@ function renderSelectedProfile() {
     badgeActiveState.className = "pill pill-neutral";
   }
 
-  textarea.value = profile.content;
-  setDirty(false);
+  if (!(isDirty && editorProfileId === profile.id)) {
+    inputProfileName.value = profile.name;
+    syncTitleInputWidth();
+    textarea.value = profile.content;
+    setDirty(false);
+    editorProfileId = profile.id;
+  }
   updateLineNumbers();
   validateEditorContent();
 }
@@ -248,18 +263,26 @@ function renderPortMappings() {
     portMappingSummary.innerHTML = "";
     return;
   }
-  portMappingSummary.innerHTML = statuses
-    .slice(0, 4)
-    .map((s) => {
-      const dotClass = s.alive ? "status-dot live" : "status-dot";
-      const stateTitle = s.alive ? "로컬 포트 응답 중" : "로컬 포트 닫혀 있음";
-      return `<span class="route-chip mono num" title="${stateTitle}">
-        <span class="${dotClass}"></span>
-        <span>${s.mapping.domain}</span>
-        <span class="muted">:${s.mapping.target_port}</span>
-      </span>`;
-    })
-    .join("");
+  statuses.slice(0, 4).forEach((s) => {
+    const chip = document.createElement("span");
+    chip.className = "route-chip mono num";
+    chip.title = s.alive ? "로컬 포트 응답 중" : "로컬 포트 닫혀 있음";
+
+    const dot = document.createElement("span");
+    dot.className = s.alive ? "status-dot live" : "status-dot";
+
+    const domain = document.createElement("span");
+    domain.textContent = s.mapping.domain;
+
+    const port = document.createElement("span");
+    port.className = "muted";
+    port.textContent = `:${s.mapping.target_port}`;
+
+    chip.appendChild(dot);
+    chip.appendChild(domain);
+    chip.appendChild(port);
+    portMappingSummary.appendChild(chip);
+  });
 }
 
 function updateLineNumbers() {
@@ -272,18 +295,30 @@ async function validateEditorContent() {
   const issues = await invoke("validate_hosts_text", { content: textarea.value });
   const conflicts = appState.preview?.conflicts || [];
 
+  let dotClass;
+  let message;
   if (issues.length > 0) {
     const first = issues[0];
     validationSummary.className = "diag-status is-error";
-    validationSummary.innerHTML = `<span class="status-dot err"></span><span>${first.line_number}행 오류: ${first.reason}</span>`;
+    dotClass = "status-dot err";
+    message = `${first.line_number}행 오류: ${first.reason}`;
   } else if (conflicts.length > 0) {
     const firstConflict = conflicts[0];
     validationSummary.className = "diag-status";
-    validationSummary.innerHTML = `<span class="status-dot"></span><span>중복 도메인 감지: ${firstConflict.domain} (${firstConflict.profiles.join(", ")})</span>`;
+    dotClass = "status-dot";
+    message = `중복 도메인 감지: ${firstConflict.domain} (${firstConflict.profiles.join(", ")})`;
   } else {
     validationSummary.className = "diag-status";
-    validationSummary.innerHTML = `<span class="status-dot ok"></span><span>문법 정상</span>`;
+    dotClass = "status-dot ok";
+    message = "문법 정상";
   }
+  validationSummary.title = message;
+
+  const dot = document.createElement("span");
+  dot.className = dotClass;
+  const text = document.createElement("span");
+  text.textContent = message;
+  validationSummary.replaceChildren(dot, text);
 }
 
 // Editor Events
@@ -344,6 +379,7 @@ async function saveCurrentProfile() {
       content: textarea.value,
       applyImmediately: true,
     });
+    setDirty(false);
     applySnapshot(snapshot);
     showToast("저장 및 시스템 hosts 반영 완료");
   } catch (err) {

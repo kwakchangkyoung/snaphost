@@ -19,12 +19,6 @@
             <span class="brand-name">SnapHost</span>
             <span id="app-version" class="version-pill num">v0.1.0</span>
           </div>
-          <button id="btn-new-profile" type="button" class="btn btn-secondary btn-compact">
-            <svg class="icon-sm" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-            </svg>
-            <span>새 프로필</span>
-          </button>
         </div>
 
         <!-- One-line Ledger Answer: What is active right now? -->
@@ -43,6 +37,12 @@
 
       <div class="nav-group-header">
         <span class="group-label">호스트 프로필</span>
+        <button id="btn-new-profile" type="button" class="btn btn-secondary btn-compact">
+          <svg class="icon-sm" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+          </svg>
+          <span>새 프로필</span>
+        </button>
       </div>
 
       <ul id="profile-list" class="profile-list" role="listbox" aria-label="프로필 목록"></ul>
@@ -104,12 +104,12 @@
         </div>
 
         <div class="header-actions">
+          <button id="btn-delete-profile" type="button" class="btn btn-secondary btn-danger-text">
+            <span>삭제</span>
+          </button>
           <button id="btn-toggle-comment" type="button" class="btn btn-secondary" title="선택 줄 주석 토글 (⌘/)">
             <span>주석 토글</span>
             <kbd class="kbd num">⌘/</kbd>
-          </button>
-          <button id="btn-delete-profile" type="button" class="btn btn-secondary btn-danger-text">
-            <span>삭제</span>
           </button>
           <button id="btn-save-profile" type="button" class="btn btn-primary">
             <span>저장 및 반영</span>
@@ -120,8 +120,8 @@
 
       <!-- Signature Element: Quick Host / Port Rule Entry Bar -->
       <form id="quick-add-form" class="quick-entry-bar" autocomplete="off">
-        <div class="quick-field">
-          <label for="quick-ip" class="quick-label">대상 주소 (IP 또는 IP:PORT)</label>
+        <div class="quick-field qf-ip">
+          <label for="quick-ip" class="quick-label">대상 IP[:포트]</label>
           <input
             id="quick-ip"
             type="text"
@@ -131,7 +131,7 @@
             required
           />
         </div>
-        <div class="quick-field quick-field-grow">
+        <div class="quick-field qf-domain">
           <label for="quick-domain" class="quick-label">연결할 로컬 도메인</label>
           <input
             id="quick-domain"
@@ -141,7 +141,7 @@
             required
           />
         </div>
-        <div class="quick-field">
+        <div class="quick-field qf-memo">
           <label for="quick-comment" class="quick-label">메모 (선택)</label>
           <input
             id="quick-comment"
