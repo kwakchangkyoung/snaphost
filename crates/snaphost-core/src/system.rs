@@ -33,7 +33,7 @@ pub struct SystemStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredState {
     pub profiles: Vec<Profile>,
-    /// If true, selecting a non-base profile turns off other non-base profiles automatically (Gas Mask Single Mode).
+    /// If true, selecting a non-base profile turns off other non-base profiles automatically (Single Switch Mode).
     /// If false, multiple profiles can be toggled concurrently (Combined Mode).
     pub single_switch_mode: bool,
 }

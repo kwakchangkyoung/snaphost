@@ -37,7 +37,7 @@
   --radius-control: 6px;
   --radius-chip: 4px;
 
-  --sidebar-width: 256px;
+  --sidebar-width: 280px;
   --control-height: 36px;
   --row-height: 40px;
 
@@ -165,18 +165,21 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  flex-wrap: nowrap;
 }
 
 .brand-identity {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
+  min-width: 0;
 }
 
 .brand-name {
   font-size: var(--fs-section);
   font-weight: 700;
   letter-spacing: -0.02em;
+  white-space: nowrap;
 }
 
 .version-pill {
@@ -185,6 +188,8 @@ body {
   background: var(--raised);
   padding: 1px 6px;
   border-radius: var(--radius-chip);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .ledger-summary {
@@ -231,6 +236,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 0 10px;
   border-radius: var(--radius-control);
   cursor: pointer;
@@ -251,6 +257,7 @@ body {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  flex: 1;
 }
 
 .profile-active-bar {
@@ -279,6 +286,8 @@ body {
   background: var(--surface);
   border: 1px solid var(--border);
   color: var(--muted);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* 28x16 Toggle Switch (taste-skill spec) */
@@ -441,6 +450,7 @@ input:checked + .slider::before {
   align-items: center;
   gap: 10px;
   min-width: 0;
+  flex: 1;
 }
 
 .title-input {
@@ -455,7 +465,8 @@ input:checked + .slider::before {
   line-height: 32px;
   padding: 2px 8px;
   margin-left: -8px;
-  width: 300px;
+  min-width: 140px;
+  max-width: 440px;
 }
 
 .title-input:hover:not(:disabled) {
@@ -473,6 +484,7 @@ input:checked + .slider::before {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 /* Pills */
@@ -482,6 +494,7 @@ input:checked + .slider::before {
   padding: 2px 8px;
   border-radius: var(--radius-chip);
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .pill-neutral {
@@ -501,8 +514,9 @@ input:checked + .slider::before {
 
 /* Quick Rule Entry Bar */
 .quick-entry-bar {
-  display: flex;
-  align-items: flex-end;
+  display: grid;
+  grid-template-columns: 190px minmax(180px, 1fr) 190px auto;
+  align-items: end;
   gap: 10px;
   padding: 12px 14px;
   background: var(--surface);
@@ -513,21 +527,20 @@ input:checked + .slider::before {
 .quick-field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-}
-
-.quick-field-grow {
-  flex: 1;
+  gap: 5px;
+  min-width: 0;
 }
 
 .quick-label {
   font-size: var(--fs-small);
   font-weight: 500;
   color: var(--muted);
+  white-space: nowrap;
 }
 
 .quick-input {
-  height: 34px;
+  width: 100%;
+  height: var(--control-height);
   padding: 0 10px;
   background: var(--ground);
   border: 1px solid var(--border);
@@ -543,7 +556,7 @@ input:checked + .slider::before {
 }
 
 .quick-submit {
-  height: 34px;
+  height: var(--control-height);
 }
 
 /* Editor Surface Card */
@@ -647,6 +660,9 @@ input:checked + .slider::before {
   font-family: inherit;
   font-size: var(--fs-body);
   font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  flex-shrink: 0;
   cursor: pointer;
   border: 1px solid transparent;
   transition: transform 0.08s ease, background-color 0.12s ease;

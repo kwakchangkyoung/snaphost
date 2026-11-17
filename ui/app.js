@@ -153,7 +153,9 @@ function renderSidebar() {
 
     const nameSpan = document.createElement("span");
     nameSpan.className = "profile-name";
-    nameSpan.textContent = profile.name;
+    nameSpan.textContent = profile.is_system_base
+      ? profile.name.replace(/\s*\(Base\)$/i, "")
+      : profile.name;
     left.appendChild(nameSpan);
 
     if (profile.is_system_base) {
@@ -203,12 +205,23 @@ function setDirty(dirty) {
   }
 }
 
+function syncTitleInputWidth() {
+  const val = inputProfileName.value || inputProfileName.placeholder || "";
+  // Korean characters take ~1.8ch, ASCII ~1ch
+  let widthCh = 2;
+  for (const ch of val) {
+    widthCh += ch.charCodeAt(0) > 127 ? 1.85 : 1.02;
+  }
+  inputProfileName.style.width = `${Math.min(Math.max(widthCh, 10), 34)}ch`;
+}
+
 function renderSelectedProfile() {
   const profile = appState.profiles.find((p) => p.id === selectedProfileId);
   if (!profile) return;
 
   inputProfileName.value = profile.name;
   inputProfileName.disabled = profile.is_system_base;
+  syncTitleInputWidth();
   if (profile.is_system_base) {
     btnDeleteProfile.classList.add("hidden");
   } else {
@@ -281,6 +294,7 @@ textarea.addEventListener("input", () => {
 });
 
 inputProfileName.addEventListener("input", () => {
+  syncTitleInputWidth();
   setDirty(true);
 });
 

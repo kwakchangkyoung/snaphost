@@ -2,7 +2,7 @@
 
 > **"손가락을 딱(Snap) 튕기듯 0.001초 만에 전환되는 Apple Silicon 네이티브 초경량 Hosts & 로컬 도메인 매니저"**
 >
-> 구형 Gas Mask의 직관적인 사용성을 계승하고, Rust의 압도적인 성능과 로컬 포트 포워딩(Reverse Proxy) 기능을 결합한 macOS 전용 메뉴바 유틸리티입니다.
+> 직관적인 프로필 전환 사용성과 Rust의 압도적인 성능, 로컬 포트 포워딩(Reverse Proxy) 기능을 결합한 macOS 전용 메뉴바 유틸리티입니다.
 
 ---
 
@@ -29,7 +29,7 @@
 
 ## 3. 핵심 기능 명세 (Feature Specifications)
 
-### Phase 1: MVP (핵심 기본 기능 - Gas Mask 완벽 대체)
+### Phase 1: MVP (핵심 기본 기능)
 1. **원본 백업 및 안전장치 (Safety First)**
    * 앱 최초 실행 시 기존 `/etc/hosts` 파일을 `original_hosts.bak`으로 영구 백업.
    * 언제든 원클릭으로 맥 초기 상태로 복구하는 **'안전 모드 복구(Panic Restore)'** 버튼 제공.
