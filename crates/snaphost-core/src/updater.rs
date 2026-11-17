@@ -1,4 +1,6 @@
+use crate::system::escape_for_applescript_shell;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use std::process::Command;
 
 pub const GITHUB_REPO: &str = "kwakchangkyoung/snaphost";
@@ -91,11 +93,28 @@ pub fn check_for_updates() -> Result<UpdateInfo, String> {
 /// Download the latest `.dmg` or `.app.tar.gz` asset from GitHub Releases, replace `/Applications/SnapHost.app`,
 /// clear macOS quarantine flags (`xattr -cr`), and relaunch the app.
 pub fn download_and_install_update(download_url: &str, asset_name: &str) -> Result<(), String> {
+    if !download_url.starts_with("https://github.com/")
+        && !download_url.starts_with("https://objects.githubusercontent.com/")
+        && !download_url.starts_with("https://api.github.com/")
+    {
+        return Err("신뢰할 수 없는 업데이트 다운로드 URL입니다.".to_string());
+    }
+
+    let safe_asset_name = Path::new(asset_name)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .filter(|s| {
+            !s.is_empty()
+                && s.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+        })
+        .ok_or_else(|| format!("유효하지 않은 업데이트 파일 이름입니다: {asset_name}"))?;
+
     let tmp_dir = std::env::temp_dir().join("snaphost_updater");
     let _ = std::fs::remove_dir_all(&tmp_dir);
     std::fs::create_dir_all(&tmp_dir).map_err(|e| e.to_string())?;
 
-    let archive_path = tmp_dir.join(asset_name);
+    let archive_path = tmp_dir.join(safe_asset_name);
     let archive_str = archive_path.display().to_string();
 
     // 1. Download asset via curl
@@ -109,7 +128,7 @@ pub fn download_and_install_update(download_url: &str, asset_name: &str) -> Resu
     }
 
     // 2. Install depending on asset type (.app.tar.gz vs .dmg)
-    if asset_name.ends_with(".app.tar.gz") {
+    if safe_asset_name.ends_with(".app.tar.gz") {
         let extract_status = Command::new("/usr/bin/tar")
             .args(["-xzf", &archive_str, "-C", &tmp_dir.display().to_string()])
             .status()
@@ -121,7 +140,7 @@ pub fn download_and_install_update(download_url: &str, asset_name: &str) -> Resu
 
         let extracted_app = tmp_dir.join("SnapHost.app");
         install_app_bundle(&extracted_app)?;
-    } else if asset_name.ends_with(".dmg") {
+    } else if safe_asset_name.ends_with(".dmg") {
         let mount_point = tmp_dir.join("mnt");
         std::fs::create_dir_all(&mount_point).map_err(|e| e.to_string())?;
         let mount_str = mount_point.display().to_string();
@@ -152,7 +171,7 @@ pub fn download_and_install_update(download_url: &str, asset_name: &str) -> Resu
 
         install_res?;
     } else {
-        return Err(format!("지원하지 않는 업데이트 파일 형식입니다: {asset_name}"));
+        return Err(format!("지원하지 않는 업데이트 파일 형식입니다: {safe_asset_name}"));
     }
 
     // 3. Relaunch updated app from /Applications/SnapHost.app after 1 second
@@ -166,27 +185,39 @@ pub fn download_and_install_update(download_url: &str, asset_name: &str) -> Resu
     Ok(())
 }
 
-fn install_app_bundle(source_app: &std::path::Path) -> Result<(), String> {
+fn install_app_bundle(source_app: &Path) -> Result<(), String> {
+    if !source_app.exists() {
+        return Err("압축 해제된 SnapHost.app 번들을 찾을 수 없습니다.".to_string());
+    }
+
     let dest_app = "/Applications/SnapHost.app";
     let src_str = source_app.display().to_string();
 
-    // Try direct copy first
-    let direct = Command::new("/bin/sh")
-        .args([
-            "-c",
-            &format!("rm -rf '{dest_app}' && cp -R '{src_str}' '{dest_app}' && xattr -cr '{dest_app}'"),
-        ])
-        .status();
-
-    if let Ok(s) = direct {
-        if s.success() {
+    // Try direct copy without shell interpolation first
+    let rm_ok = Command::new("/bin/rm")
+        .args(["-rf", dest_app])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if rm_ok {
+        let cp_ok = Command::new("/bin/cp")
+            .args(["-R", &src_str, dest_app])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if cp_ok {
+            let _ = Command::new("/usr/bin/xattr")
+                .args(["-cr", dest_app])
+                .status();
             return Ok(());
         }
     }
 
-    // Fallback: request macOS admin privileges via osascript
+    // Fallback: request macOS admin privileges via osascript with safe escaping
+    let escaped_dest = escape_for_applescript_shell(dest_app);
+    let escaped_src = escape_for_applescript_shell(&src_str);
     let script = format!(
-        "do shell script \"rm -rf '{dest_app}' && cp -R '{src_str}' '{dest_app}' && xattr -cr '{dest_app}'\" with administrator privileges"
+        "do shell script \"rm -rf '{escaped_dest}' && cp -R '{escaped_src}' '{escaped_dest}' && xattr -cr '{escaped_dest}'\" with administrator privileges"
     );
     let output = Command::new("osascript")
         .args(["-e", &script])

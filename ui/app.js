@@ -2,7 +2,7 @@ const invoke = window.__TAURI__?.core?.invoke;
 const listen = window.__TAURI__?.event?.listen;
 
 let appState = {
-  app_version: "0.1.1",
+  app_version: "0.1.2",
   profiles: [],
   single_switch_mode: false,
   status: null,
@@ -67,15 +67,24 @@ function askConfirm(title, message, okLabel = "확인") {
     confirmMessage.textContent = message;
     btnConfirmOk.textContent = okLabel;
 
+    let settled = false;
     const cleanup = (result) => {
+      if (settled) return;
+      settled = true;
       btnConfirmCancel.onclick = null;
       btnConfirmOk.onclick = null;
-      dialogConfirm.close();
+      dialogConfirm.oncancel = null;
+      dialogConfirm.onclose = null;
+      if (dialogConfirm.open) {
+        dialogConfirm.close();
+      }
       resolve(result);
     };
 
     btnConfirmCancel.onclick = () => cleanup(false);
     btnConfirmOk.onclick = () => cleanup(true);
+    dialogConfirm.oncancel = () => cleanup(false);
+    dialogConfirm.onclose = () => cleanup(false);
     dialogConfirm.showModal();
   });
 }
@@ -258,15 +267,32 @@ function renderSelectedProfile() {
 }
 
 function renderPortMappings() {
+  portMappingSummary.innerHTML = "";
   const statuses = appState.port_statuses || [];
   if (statuses.length === 0) {
-    portMappingSummary.innerHTML = "";
     return;
   }
+
+  if (appState.proxy_running && appState.proxy_port) {
+    const proxyBadge = document.createElement("span");
+    proxyBadge.className = "route-chip mono num";
+    proxyBadge.title =
+      appState.proxy_port === 80
+        ? "내장 리버스 프록시가 80번 포트에서 수신 중입니다"
+        : `80번 포트 권한 제한으로 내장 프록시가 :${appState.proxy_port} 포트에서 수신 중입니다 (http://도메인:${appState.proxy_port})`;
+    const proxyLabel = document.createElement("span");
+    proxyLabel.className = "muted";
+    proxyLabel.textContent = `프록시 :${appState.proxy_port}`;
+    proxyBadge.appendChild(proxyLabel);
+    portMappingSummary.appendChild(proxyBadge);
+  }
+
   statuses.slice(0, 4).forEach((s) => {
     const chip = document.createElement("span");
     chip.className = "route-chip mono num";
-    chip.title = s.alive ? "로컬 포트 응답 중" : "로컬 포트 닫혀 있음";
+    chip.title = s.alive
+      ? `${s.mapping.domain} -> ${s.mapping.target_ip}:${s.mapping.target_port} (로컬 포트 응답 중)`
+      : `${s.mapping.domain} -> ${s.mapping.target_ip}:${s.mapping.target_port} (로컬 포트 닫혀 있음)`;
 
     const dot = document.createElement("span");
     dot.className = s.alive ? "status-dot live" : "status-dot";
@@ -283,6 +309,13 @@ function renderPortMappings() {
     chip.appendChild(port);
     portMappingSummary.appendChild(chip);
   });
+
+  if (statuses.length > 4) {
+    const moreChip = document.createElement("span");
+    moreChip.className = "route-chip mono num";
+    moreChip.textContent = `+${statuses.length - 4}`;
+    portMappingSummary.appendChild(moreChip);
+  }
 }
 
 function updateLineNumbers() {
@@ -290,9 +323,21 @@ function updateLineNumbers() {
   lineNumbers.innerHTML = Array.from({ length: count }, (_, i) => i + 1).join("<br>");
 }
 
+let validationTimer = null;
+let validationSeq = 0;
+
+function scheduleValidateEditorContent() {
+  if (validationTimer) clearTimeout(validationTimer);
+  validationTimer = setTimeout(() => {
+    validateEditorContent();
+  }, 120);
+}
+
 async function validateEditorContent() {
   if (!invoke) return;
+  const seq = ++validationSeq;
   const issues = await invoke("validate_hosts_text", { content: textarea.value });
+  if (seq !== validationSeq) return;
   const conflicts = appState.preview?.conflicts || [];
 
   let dotClass;
@@ -325,7 +370,7 @@ async function validateEditorContent() {
 textarea.addEventListener("input", () => {
   setDirty(true);
   updateLineNumbers();
-  validateEditorContent();
+  scheduleValidateEditorContent();
 });
 
 inputProfileName.addEventListener("input", () => {

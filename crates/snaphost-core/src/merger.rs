@@ -1,7 +1,7 @@
 use crate::parser::{HostsLine, PortMapping, ValidationIssue, parse_hosts};
 use crate::profile::Profile;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MergeResult {
@@ -30,6 +30,7 @@ pub fn merge_profiles(profiles: &[Profile]) -> MergeResult {
     output.push_str("# =====================================================================\n\n");
 
     let mut port_mappings = Vec::new();
+    let mut mapped_domains: HashSet<String> = HashSet::new();
     let mut domain_sources: HashMap<String, Vec<String>> = HashMap::new();
     let mut validation_issues = Vec::new();
 
@@ -47,48 +48,56 @@ pub fn merge_profiles(profiles: &[Profile]) -> MergeResult {
                     output.push('\n');
                 }
                 HostsLine::Entry(entry) => {
-                    // Format standard /etc/hosts line (stripping `:PORT` so macOS resolver accepts it)
+                    // Format standard /etc/hosts line (stripping `:PORT` so macOS resolver accepts it, preserving `%zone` if present)
+                    let ip_display = match &entry.zone_id {
+                        Some(zone) => format!("{}%{}", entry.ip, zone),
+                        None => entry.ip.to_string(),
+                    };
                     let domains_joined = entry.domains.join(" ");
                     match (&entry.port, &entry.inline_comment) {
                         (Some(port), Some(comment)) => {
                             output.push_str(&format!(
                                 "{:<15} {} # [SnapHost -> :{}] {}\n",
-                                entry.ip, domains_joined, port, comment
+                                ip_display, domains_joined, port, comment
                             ));
                         }
                         (Some(port), None) => {
                             output.push_str(&format!(
                                 "{:<15} {} # [SnapHost -> :{}]\n",
-                                entry.ip, domains_joined, port
+                                ip_display, domains_joined, port
                             ));
                         }
                         (None, Some(comment)) => {
                             output.push_str(&format!(
                                 "{:<15} {} # {}\n",
-                                entry.ip, domains_joined, comment
+                                ip_display, domains_joined, comment
                             ));
                         }
                         (None, None) => {
-                            output.push_str(&format!("{:<15} {}\n", entry.ip, domains_joined));
+                            output.push_str(&format!("{:<15} {}\n", ip_display, domains_joined));
                         }
                     }
 
                     for domain in &entry.domains {
+                        let domain_lower = domain.to_lowercase();
                         // Record for conflict detection (ignore standard localhost entries)
-                        if domain != "localhost" && domain != "broadcasthost" {
-                            let sources = domain_sources.entry(domain.clone()).or_default();
+                        if domain_lower != "localhost" && domain_lower != "broadcasthost" {
+                            let sources = domain_sources.entry(domain_lower.clone()).or_default();
                             if !sources.contains(&profile.name) {
                                 sources.push(profile.name.clone());
                             }
                         }
 
                         if let Some(port) = entry.port {
-                            port_mappings.push(PortMapping {
-                                domain: domain.clone(),
-                                target_ip: entry.ip,
-                                target_port: port,
-                                profile_name: profile.name.clone(),
-                            });
+                            // Keep first matching port mapping so proxy routing matches top-down /etc/hosts priority
+                            if mapped_domains.insert(domain_lower.clone()) {
+                                port_mappings.push(PortMapping {
+                                    domain: domain_lower,
+                                    target_ip: entry.ip,
+                                    target_port: port,
+                                    profile_name: profile.name.clone(),
+                                });
+                            }
                         }
                     }
                 }
@@ -133,11 +142,12 @@ mod tests {
 
     #[test]
     fn test_merge_profiles_with_ports_and_conflicts() {
-        let p1 = Profile::new("System Base", "127.0.0.1 localhost\n127.0.0.1 api.dev.local", true, true);
+        let p1 = Profile::new("System Base", "127.0.0.1 localhost\n127.0.0.1 Api.Dev.Local\nfe80::1%lo0 localhost", true, true);
         let p2 = Profile::new("Work API", "127.0.0.1:8080 api.dev.local\n127.0.0.1:3000 web.dev.local", true, false);
 
         let result = merge_profiles(&[p1, p2]);
         assert!(result.hosts_content.contains("127.0.0.1       web.dev.local # [SnapHost -> :3000]"));
+        assert!(result.hosts_content.contains("fe80::1%lo0     localhost"));
         assert_eq!(result.port_mappings.len(), 2);
         assert_eq!(result.conflicts.len(), 1);
         assert_eq!(result.conflicts[0].domain, "api.dev.local");

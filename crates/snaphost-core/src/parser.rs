@@ -22,6 +22,9 @@ pub enum HostsLine {
 pub struct HostEntry {
     pub line_number: usize,
     pub ip: IpAddr,
+    /// Optional IPv6 zone index (e.g., `lo0` in `fe80::1%lo0`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zone_id: Option<String>,
     /// Optional port for SnapHost local reverse proxy (e.g., `127.0.0.1:3000 api.local`)
     pub port: Option<u16>,
     pub domains: Vec<String>,
@@ -65,7 +68,7 @@ pub fn parse_line(line_number: usize, raw_line: &str) -> HostsLine {
         return HostsLine::Empty;
     };
 
-    let (ip, port) = match parse_ip_and_optional_port(target_token) {
+    let (ip, zone_id, port) = match parse_ip_and_optional_port(target_token) {
         Ok(res) => res,
         Err(reason) => {
             return HostsLine::Invalid {
@@ -98,6 +101,7 @@ pub fn parse_line(line_number: usize, raw_line: &str) -> HostsLine {
     HostsLine::Entry(HostEntry {
         line_number,
         ip,
+        zone_id,
         port,
         domains,
         inline_comment,
@@ -132,21 +136,41 @@ pub fn validate_hosts(content: &str) -> Vec<ValidationIssue> {
         .collect()
 }
 
-fn parse_ip_and_optional_port(token: &str) -> Result<(IpAddr, Option<u16>), String> {
+fn split_ipv6_zone(input: &str) -> (&str, Option<String>) {
+    if let Some((ip_str, zone)) = input.split_once('%') {
+        let zone_trimmed = zone.trim();
+        let zone_opt = if zone_trimmed.is_empty() {
+            None
+        } else {
+            Some(zone_trimmed.to_string())
+        };
+        (ip_str, zone_opt)
+    } else {
+        (input, None)
+    }
+}
+
+fn parse_ip_and_optional_port(
+    token: &str,
+) -> Result<(IpAddr, Option<String>, Option<u16>), String> {
     // 1. Try standard IP first (handles both IPv4 and IPv6 like `::1` or `fe80::1%lo0`)
-    let clean_token = token.split('%').next().unwrap_or(token);
+    let (clean_token, zone_id) = split_ipv6_zone(token);
     if let Ok(ip) = clean_token.parse::<IpAddr>() {
-        return Ok((ip, None));
+        if ip.is_ipv4() && zone_id.is_some() {
+            return Err(format!("IPv4 주소에는 영역 인덱스(%)를 사용할 수 없습니다: '{token}'"));
+        }
+        return Ok((ip, zone_id, None));
     }
 
-    // 2. Bracketed IPv6 with port: `[::1]:3000`
+    // 2. Bracketed IPv6 with port: `[::1]:3000` or `[fe80::1%lo0]:3000`
     if let Some(rest) = token.strip_prefix('[') {
         if let Some((ip_part, port_part)) = rest.split_once("]:") {
-            let ip = ip_part
+            let (clean_ip, zone_id) = split_ipv6_zone(ip_part);
+            let ip = clean_ip
                 .parse::<IpAddr>()
                 .map_err(|_| format!("유효하지 않은 IPv6 주소입니다: '{ip_part}'"))?;
             let port = parse_port(port_part)?;
-            return Ok((ip, Some(port)));
+            return Ok((ip, zone_id, Some(port)));
         }
     }
 
@@ -157,7 +181,7 @@ fn parse_ip_and_optional_port(token: &str) -> Result<(IpAddr, Option<u16>), Stri
                 .parse::<IpAddr>()
                 .map_err(|_| format!("유효하지 않은 IP 주소입니다: '{ip_part}'"))?;
             let port = parse_port(port_part)?;
-            return Ok((ip, Some(port)));
+            return Ok((ip, None, Some(port)));
         }
     }
 
@@ -178,11 +202,24 @@ fn is_valid_domain(domain: &str) -> bool {
     if domain.is_empty() || domain.len() > 253 {
         return false;
     }
-    domain
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.' || c == '_')
-        && !domain.starts_with('-')
-        && !domain.ends_with('-')
+    if domain.starts_with('.') || domain.ends_with('.') {
+        return false;
+    }
+    for label in domain.split('.') {
+        if label.is_empty() || label.len() > 63 {
+            return false;
+        }
+        if label.starts_with('-') || label.ends_with('-') {
+            return false;
+        }
+        if !label
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return false;
+        }
+    }
+    true
 }
 
 #[cfg(test)]
@@ -198,6 +235,7 @@ mod tests {
             HostsLine::Entry(HostEntry {
                 line_number: 1,
                 ip: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                zone_id: None,
                 port: None,
                 domains: vec!["localhost".to_string(), "my.local".to_string()],
                 inline_comment: Some("local dev".to_string()),
@@ -213,6 +251,7 @@ mod tests {
             HostsLine::Entry(HostEntry {
                 line_number: 2,
                 ip: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                zone_id: None,
                 port: Some(3000),
                 domains: vec!["web.myapp.local".to_string(), "api.myapp.local".to_string()],
                 inline_comment: None,
@@ -228,6 +267,7 @@ mod tests {
             HostsLine::Entry(HostEntry {
                 line_number: 3,
                 ip: IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1)),
+                zone_id: Some("lo0".to_string()),
                 port: None,
                 domains: vec!["localhost".to_string()],
                 inline_comment: None,
@@ -237,9 +277,10 @@ mod tests {
 
     #[test]
     fn test_invalid_line_reporting() {
-        let issues = validate_hosts("999.999.999.999 bad.domain\n127.0.0.1");
-        assert_eq!(issues.len(), 2);
+        let issues = validate_hosts("999.999.999.999 bad.domain\n127.0.0.1\n127.0.0.1 .bad..domain");
+        assert_eq!(issues.len(), 3);
         assert_eq!(issues[0].line_number, 1);
         assert_eq!(issues[1].line_number, 2);
+        assert_eq!(issues[2].line_number, 3);
     }
 }

@@ -34,38 +34,60 @@ pub struct AppSnapshot {
     pub proxy_port: u16,
 }
 
-fn build_snapshot(mgr: &SnapHostManager, proxy: &LocalReverseProxy) -> AppSnapshot {
-    let preview = mgr.preview_merge();
-    proxy.update_mappings(&preview.port_mappings);
-    if !preview.port_mappings.is_empty() && !proxy.is_running() {
+fn sync_proxy_with_mappings(proxy: &LocalReverseProxy, mappings: &[PortMapping]) {
+    proxy.update_mappings(mappings);
+    if !mappings.is_empty() && !proxy.is_running() {
         let _ = proxy.start(80);
     }
+}
 
-    let port_statuses = preview
-        .port_mappings
-        .iter()
-        .map(|m| PortMappingStatus {
-            mapping: m.clone(),
-            alive: check_port_alive(m.target_ip, m.target_port),
-        })
-        .collect();
+fn build_snapshot_with_lock(state: &AppState) -> Result<AppSnapshot, String> {
+    let (profiles, single_switch_mode, status, preview) = {
+        let mgr = state.manager.lock().map_err(|e| e.to_string())?;
+        (
+            mgr.profiles().to_vec(),
+            mgr.single_switch_mode(),
+            mgr.status(),
+            mgr.preview_merge(),
+        )
+    };
 
-    AppSnapshot {
+    sync_proxy_with_mappings(&state.proxy, &preview.port_mappings);
+
+    let port_statuses = std::thread::scope(|s| {
+        let handles: Vec<_> = preview
+            .port_mappings
+            .iter()
+            .map(|m| {
+                let mapping = m.clone();
+                s.spawn(move || PortMappingStatus {
+                    alive: check_port_alive(mapping.target_ip, mapping.target_port),
+                    mapping,
+                })
+            })
+            .collect();
+
+        handles
+            .into_iter()
+            .filter_map(|h| h.join().ok())
+            .collect::<Vec<_>>()
+    });
+
+    Ok(AppSnapshot {
         app_version: CURRENT_VERSION.to_string(),
-        profiles: mgr.profiles().to_vec(),
-        single_switch_mode: mgr.single_switch_mode(),
-        status: mgr.status(),
+        profiles,
+        single_switch_mode,
+        status,
         preview,
         port_statuses,
-        proxy_running: proxy.is_running(),
-        proxy_port: proxy.current_port(),
-    }
+        proxy_running: state.proxy.is_running(),
+        proxy_port: state.proxy.current_port(),
+    })
 }
 
 #[tauri::command]
 fn get_app_snapshot(state: State<'_, AppState>) -> Result<AppSnapshot, String> {
-    let mgr = state.manager.lock().map_err(|e| e.to_string())?;
-    Ok(build_snapshot(&mgr, &state.proxy))
+    build_snapshot_with_lock(&state)
 }
 
 #[tauri::command]
@@ -75,11 +97,12 @@ fn create_profile(
     name: String,
     content: String,
 ) -> Result<AppSnapshot, String> {
-    let mut mgr = state.manager.lock().map_err(|e| e.to_string())?;
-    mgr.create_profile(name, content)
-        .map_err(|e| e.to_string())?;
-    let snapshot = build_snapshot(&mgr, &state.proxy);
-    drop(mgr);
+    {
+        let mut mgr = state.manager.lock().map_err(|e| e.to_string())?;
+        mgr.create_profile(name, content)
+            .map_err(|e| e.to_string())?;
+    }
+    let snapshot = build_snapshot_with_lock(&state)?;
     let _ = refresh_tray_menu(&app);
     Ok(snapshot)
 }
@@ -93,17 +116,18 @@ fn update_profile(
     content: String,
     apply_immediately: bool,
 ) -> Result<AppSnapshot, String> {
-    let mut mgr = state.manager.lock().map_err(|e| e.to_string())?;
-    let updated = mgr
-        .update_profile(&id, name, content)
-        .map_err(|e| e.to_string())?;
+    {
+        let mut mgr = state.manager.lock().map_err(|e| e.to_string())?;
+        let updated = mgr
+            .update_profile(&id, name, content)
+            .map_err(|e| e.to_string())?;
 
-    if apply_immediately && updated.enabled {
-        mgr.apply_to_system().map_err(|e| e.to_string())?;
+        if apply_immediately && updated.enabled {
+            mgr.apply_to_system().map_err(|e| e.to_string())?;
+        }
     }
 
-    let snapshot = build_snapshot(&mgr, &state.proxy);
-    drop(mgr);
+    let snapshot = build_snapshot_with_lock(&state)?;
     let _ = refresh_tray_menu(&app);
     Ok(snapshot)
 }
@@ -114,11 +138,14 @@ fn delete_profile(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<AppSnapshot, String> {
-    let mut mgr = state.manager.lock().map_err(|e| e.to_string())?;
-    mgr.delete_profile(&id).map_err(|e| e.to_string())?;
-    let _ = mgr.apply_to_system();
-    let snapshot = build_snapshot(&mgr, &state.proxy);
-    drop(mgr);
+    {
+        let mut mgr = state.manager.lock().map_err(|e| e.to_string())?;
+        let was_enabled = mgr.delete_profile(&id).map_err(|e| e.to_string())?;
+        if was_enabled {
+            mgr.apply_to_system().map_err(|e| e.to_string())?;
+        }
+    }
+    let snapshot = build_snapshot_with_lock(&state)?;
     let _ = refresh_tray_menu(&app);
     Ok(snapshot)
 }
@@ -130,11 +157,12 @@ fn toggle_profile(
     id: String,
     enabled: bool,
 ) -> Result<AppSnapshot, String> {
-    let mut mgr = state.manager.lock().map_err(|e| e.to_string())?;
-    mgr.toggle_profile(&id, enabled)
-        .map_err(|e| e.to_string())?;
-    let snapshot = build_snapshot(&mgr, &state.proxy);
-    drop(mgr);
+    {
+        let mut mgr = state.manager.lock().map_err(|e| e.to_string())?;
+        mgr.toggle_profile(&id, enabled)
+            .map_err(|e| e.to_string())?;
+    }
+    let snapshot = build_snapshot_with_lock(&state)?;
     let _ = refresh_tray_menu(&app);
     Ok(snapshot)
 }
@@ -145,21 +173,24 @@ fn set_switch_mode(
     state: State<'_, AppState>,
     single_mode: bool,
 ) -> Result<AppSnapshot, String> {
-    let mut mgr = state.manager.lock().map_err(|e| e.to_string())?;
-    mgr.set_single_switch_mode(single_mode)
-        .map_err(|e| e.to_string())?;
-    let snapshot = build_snapshot(&mgr, &state.proxy);
-    drop(mgr);
+    {
+        let mut mgr = state.manager.lock().map_err(|e| e.to_string())?;
+        mgr.set_single_switch_mode(single_mode)
+            .map_err(|e| e.to_string())?;
+    }
+    let snapshot = build_snapshot_with_lock(&state)?;
     let _ = refresh_tray_menu(&app);
     Ok(snapshot)
 }
 
 #[tauri::command]
 fn grant_permission(state: State<'_, AppState>) -> Result<AppSnapshot, String> {
-    let mgr = state.manager.lock().map_err(|e| e.to_string())?;
-    mgr.grant_one_time_permission()
-        .map_err(|e| e.to_string())?;
-    Ok(build_snapshot(&mgr, &state.proxy))
+    {
+        let mgr = state.manager.lock().map_err(|e| e.to_string())?;
+        mgr.grant_one_time_permission()
+            .map_err(|e| e.to_string())?;
+    }
+    build_snapshot_with_lock(&state)
 }
 
 #[tauri::command]
@@ -167,10 +198,11 @@ fn panic_restore(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<AppSnapshot, String> {
-    let mut mgr = state.manager.lock().map_err(|e| e.to_string())?;
-    mgr.restore_original_backup().map_err(|e| e.to_string())?;
-    let snapshot = build_snapshot(&mgr, &state.proxy);
-    drop(mgr);
+    {
+        let mut mgr = state.manager.lock().map_err(|e| e.to_string())?;
+        mgr.restore_original_backup().map_err(|e| e.to_string())?;
+    }
+    let snapshot = build_snapshot_with_lock(&state)?;
     let _ = refresh_tray_menu(&app);
     Ok(snapshot)
 }
@@ -198,7 +230,7 @@ fn install_update(
 
 fn build_tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let state = app.state::<AppState>();
-    let mgr = state.manager.lock().unwrap();
+    let mgr = state.manager.lock().unwrap_or_else(|e| e.into_inner());
 
     let menu = Menu::new(app)?;
     let header = MenuItem::with_id(
@@ -273,6 +305,8 @@ fn refresh_tray_menu(app: &AppHandle) -> tauri::Result<()> {
 pub fn run() {
     let manager = SnapHostManager::init_default().expect("Failed to initialize SnapHostManager");
     let proxy = LocalReverseProxy::new();
+    let initial_preview = manager.preview_merge();
+    sync_proxy_with_mappings(&proxy, &initial_preview.port_mappings);
 
     tauri::Builder::default()
         .manage(AppState {
@@ -294,7 +328,7 @@ pub fn run() {
                             if let Some(p) = mgr.profiles().iter().find(|p| p.id == profile_id) {
                                 let next_state = !p.enabled;
                                 if let Ok(merged) = mgr.toggle_profile(profile_id, next_state) {
-                                    state.proxy.update_mappings(&merged.port_mappings);
+                                    sync_proxy_with_mappings(&state.proxy, &merged.port_mappings);
                                     should_refresh = true;
                                 }
                             }

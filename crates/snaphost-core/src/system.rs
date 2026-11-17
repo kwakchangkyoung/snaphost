@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use thiserror::Error;
+use uuid::Uuid;
 
 pub const ETC_HOSTS_PATH: &str = "/private/etc/hosts";
 
@@ -116,7 +117,27 @@ impl SnapHostManager {
 
     pub fn set_single_switch_mode(&mut self, single_mode: bool) -> Result<(), SnapHostError> {
         self.state.single_switch_mode = single_mode;
-        self.save_state()
+
+        let mut modified_active = false;
+        if single_mode {
+            let mut kept_one = false;
+            for p in &mut self.state.profiles {
+                if !p.is_system_base && p.enabled {
+                    if !kept_one {
+                        kept_one = true;
+                    } else {
+                        p.enabled = false;
+                        modified_active = true;
+                    }
+                }
+            }
+        }
+
+        self.save_state()?;
+        if modified_active {
+            let _ = self.apply_to_system();
+        }
+        Ok(())
     }
 
     pub fn status(&self) -> SystemStatus {
@@ -152,7 +173,9 @@ impl SnapHostManager {
             .find(|p| p.id == id)
             .ok_or_else(|| SnapHostError::ProfileNotFound(id.to_string()))?;
 
-        profile.name = name;
+        if !profile.is_system_base {
+            profile.name = name;
+        }
         profile.content = content;
         profile.updated_at = chrono::Utc::now();
         let updated = profile.clone();
@@ -160,7 +183,7 @@ impl SnapHostManager {
         Ok(updated)
     }
 
-    pub fn delete_profile(&mut self, id: &str) -> Result<(), SnapHostError> {
+    pub fn delete_profile(&mut self, id: &str) -> Result<bool, SnapHostError> {
         let idx = self
             .state
             .profiles
@@ -172,9 +195,9 @@ impl SnapHostManager {
             return Err(SnapHostError::CannotDeleteSystemBase);
         }
 
-        self.state.profiles.remove(idx);
+        let removed = self.state.profiles.remove(idx);
         self.save_state()?;
-        Ok(())
+        Ok(removed.enabled)
     }
 
     /// Toggle a profile on/off and immediately apply the merged result to `/etc/hosts`.
@@ -224,6 +247,10 @@ impl SnapHostManager {
         };
 
         write_hosts_content(&self.hosts_path, &content)?;
+        for p in &mut self.state.profiles {
+            p.enabled = p.is_system_base;
+        }
+        self.save_state()?;
         let _ = flush_dns_cache();
         Ok(content)
     }
@@ -231,10 +258,10 @@ impl SnapHostManager {
     /// Request one-time macOS administrator privilege so `/private/etc/hosts` becomes writable by the current user
     /// for instant 0ms switching without repeated password prompts.
     pub fn grant_one_time_permission(&self) -> Result<(), SnapHostError> {
-        let user = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
-        let target = self.hosts_path.display().to_string();
+        let user = sanitized_username();
+        let target = escape_for_applescript_shell(&self.hosts_path.display().to_string());
         let script = format!(
-            "do shell script \"chown {user}:staff '{target}' && chmod 664 '{target}'\" with administrator privileges"
+            "do shell script \"chown {user}:staff '{target}' && chmod 644 '{target}'\" with administrator privileges"
         );
 
         let output = Command::new("osascript")
@@ -261,23 +288,42 @@ fn is_file_writable(path: &Path) -> bool {
     fs::OpenOptions::new().write(true).open(path).is_ok()
 }
 
+fn sanitized_username() -> String {
+    let raw = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
+    let cleaned: String = raw
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-' || *c == '.')
+        .collect();
+    if cleaned.is_empty() {
+        "root".to_string()
+    } else {
+        cleaned
+    }
+}
+
+/// Escape a string so it can be safely embedded inside single quotes `'...'` within an AppleScript `"..."` string.
+pub(crate) fn escape_for_applescript_shell(input: &str) -> String {
+    let shell_escaped = input.replace('\'', "'\\''");
+    shell_escaped.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 fn write_hosts_content(hosts_path: &Path, content: &str) -> Result<(), SnapHostError> {
     // 1. Fast path: direct write if user already has write access
     if fs::write(hosts_path, content).is_ok() {
         return Ok(());
     }
 
-    // 2. Fallback: write temp file and move/copy via osascript administrator prompt
-    let tmp_path = std::env::temp_dir().join("snaphost_staged_hosts");
+    // 2. Fallback: write unique temp file and copy via osascript administrator prompt
+    let tmp_path = std::env::temp_dir().join(format!("snaphost_staged_{}", Uuid::new_v4()));
     fs::write(&tmp_path, content)?;
 
-    let user = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
-    let target = hosts_path.display().to_string();
-    let staged = tmp_path.display().to_string();
+    let user = sanitized_username();
+    let target = escape_for_applescript_shell(&hosts_path.display().to_string());
+    let staged = escape_for_applescript_shell(&tmp_path.display().to_string());
 
     // Also grant ownership during fallback so subsequent switches are instant (0ms)
     let script = format!(
-        "do shell script \"cp '{staged}' '{target}' && chown {user}:staff '{target}' && chmod 664 '{target}'\" with administrator privileges"
+        "do shell script \"cp '{staged}' '{target}' && chown {user}:staff '{target}' && chmod 644 '{target}'\" with administrator privileges"
     );
 
     let output = Command::new("osascript")
@@ -297,8 +343,10 @@ fn write_hosts_content(hosts_path: &Path, content: &str) -> Result<(), SnapHostE
 
 /// Flush macOS DNS caches (`dscacheutil` + `mDNSResponder`)
 pub fn flush_dns_cache() -> Result<(), SnapHostError> {
-    let _ = Command::new("dscacheutil").arg("-flushcache").output();
-    let _ = Command::new("killall")
+    let _ = Command::new("/usr/bin/dscacheutil")
+        .arg("-flushcache")
+        .output();
+    let _ = Command::new("/usr/bin/killall")
         .args(["-HUP", "mDNSResponder"])
         .output();
     Ok(())
