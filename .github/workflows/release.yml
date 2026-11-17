@@ -12,7 +12,7 @@ permissions:
 jobs:
   release-macos:
     name: Build & Release SnapHost (Apple Silicon)
-    runs-on: macos-14 # Apple Silicon (M1/M2/M3) runner
+    runs-on: macos-15 # Apple Silicon (arm64) runner
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
