@@ -54,12 +54,17 @@ impl LocalReverseProxy {
 
     /// Start listening on `127.0.0.1:<port>` (and `[::1]:<port>` if available).
     /// Defaults to 80, falls back to 8880 if port 80 requires root.
+    ///
+    /// macOS lets non-root processes bind ports < 1024 only on the wildcard
+    /// address, so if the loopback bind is denied we bind `0.0.0.0` instead and
+    /// reject non-loopback peers in the accept loop.
     pub fn start(&self, preferred_port: u16) -> Result<u16, String> {
         if self.is_running() {
             return Ok(self.current_port());
         }
 
         let listener_v4 = TcpListener::bind(("127.0.0.1", preferred_port))
+            .or_else(|_| TcpListener::bind(("0.0.0.0", preferred_port)))
             .or_else(|_| TcpListener::bind(("127.0.0.1", 8880)))
             .map_err(|e| format!("프록시 포트 바인딩 실패: {e}"))?;
 
@@ -80,7 +85,9 @@ impl LocalReverseProxy {
         );
 
         // Best-effort IPv6 loopback listener on the same port
-        if let Ok(listener_v6) = TcpListener::bind(("::1", bound_port)) {
+        if let Ok(listener_v6) = TcpListener::bind(("::1", bound_port))
+            .or_else(|_| TcpListener::bind(("::", bound_port)))
+        {
             Self::spawn_accept_loop(
                 listener_v6,
                 Arc::clone(&self.routes),
@@ -103,6 +110,13 @@ impl LocalReverseProxy {
                 }
                 match incoming {
                     Ok(client) => {
+                        let is_loopback = client
+                            .peer_addr()
+                            .is_ok_and(|a| a.ip().to_canonical().is_loopback());
+                        if !is_loopback {
+                            let _ = client.shutdown(Shutdown::Both);
+                            continue;
+                        }
                         let routes_ref = Arc::clone(&routes);
                         thread::spawn(move || {
                             let _ = handle_client(client, routes_ref);

@@ -2,7 +2,7 @@ const invoke = window.__TAURI__?.core?.invoke;
 const listen = window.__TAURI__?.event?.listen;
 
 let appState = {
-  app_version: "0.1.4",
+  app_version: "0.1.5",
   profiles: [],
   single_switch_mode: false,
   status: null,
