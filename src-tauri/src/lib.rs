@@ -1,10 +1,10 @@
 use serde::Serialize;
 use snaphost_core::{
-    CURRENT_VERSION, LocalReverseProxy, MergeResult, PortMapping, Profile, SnapHostManager,
+    CURRENT_VERSION, LocalCa, LocalReverseProxy, MergeResult, PortMapping, Profile, SnapHostManager,
     SystemStatus, UpdateInfo, ValidationIssue, check_for_updates, check_port_alive,
-    download_and_install_update, validate_hosts,
+    download_and_install_update, install_ca_trust, is_ca_trusted, remove_ca, validate_hosts,
 };
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{
     ActivationPolicy, AppHandle, Emitter, Manager, State, WindowEvent,
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
@@ -32,6 +32,9 @@ pub struct AppSnapshot {
     pub port_statuses: Vec<PortMappingStatus>,
     pub proxy_running: bool,
     pub proxy_port: u16,
+    pub https_enabled: bool,
+    pub https_port: Option<u16>,
+    pub https_trusted: bool,
 }
 
 fn sync_proxy_with_mappings(proxy: &LocalReverseProxy, mappings: &[PortMapping]) {
@@ -42,14 +45,20 @@ fn sync_proxy_with_mappings(proxy: &LocalReverseProxy, mappings: &[PortMapping])
 }
 
 fn build_snapshot_with_lock(state: &AppState) -> Result<AppSnapshot, String> {
-    let (profiles, single_switch_mode, status, preview) = {
+    let (profiles, single_switch_mode, status, preview, https_enabled, data_dir) = {
         let mgr = state.manager.lock().map_err(|e| e.to_string())?;
         (
             mgr.profiles().to_vec(),
             mgr.single_switch_mode(),
             mgr.status(),
             mgr.preview_merge(),
+            mgr.https_enabled(),
+            mgr.data_dir().to_path_buf(),
         )
+    };
+    let https_trusted = https_enabled && {
+        let ca_path = LocalCa::cert_path_in(&data_dir);
+        ca_path.exists() && is_ca_trusted(&ca_path)
     };
 
     sync_proxy_with_mappings(&state.proxy, &preview.port_mappings);
@@ -82,6 +91,9 @@ fn build_snapshot_with_lock(state: &AppState) -> Result<AppSnapshot, String> {
         port_statuses,
         proxy_running: state.proxy.is_running(),
         proxy_port: state.proxy.current_port(),
+        https_enabled,
+        https_port: state.proxy.tls_port(),
+        https_trusted,
     })
 }
 
@@ -193,6 +205,26 @@ fn grant_permission(state: State<'_, AppState>) -> Result<AppSnapshot, String> {
         let mgr = state.manager.lock().map_err(|e| e.to_string())?;
         mgr.grant_one_time_permission()
             .map_err(|e| e.to_string())?;
+    }
+    build_snapshot_with_lock(&state)
+}
+
+#[tauri::command]
+fn set_https_enabled(state: State<'_, AppState>, enabled: bool) -> Result<AppSnapshot, String> {
+    {
+        let mut mgr = state.manager.lock().map_err(|e| e.to_string())?;
+        let data_dir = mgr.data_dir().to_path_buf();
+        if enabled {
+            let ca = LocalCa::load_or_create(&data_dir)?;
+            if !is_ca_trusted(ca.cert_path()) {
+                install_ca_trust(ca.cert_path())?;
+            }
+            state.proxy.start_tls(443, Arc::new(ca))?;
+        } else {
+            state.proxy.stop_tls();
+            remove_ca(&data_dir)?;
+        }
+        mgr.set_https_enabled(enabled).map_err(|e| e.to_string())?;
     }
     build_snapshot_with_lock(&state)
 }
@@ -311,6 +343,12 @@ pub fn run() {
     let proxy = LocalReverseProxy::new();
     let initial_preview = manager.preview_merge();
     sync_proxy_with_mappings(&proxy, &initial_preview.port_mappings);
+    if manager.https_enabled()
+        && LocalCa::exists(manager.data_dir())
+        && let Ok(ca) = LocalCa::load_or_create(manager.data_dir())
+    {
+        let _ = proxy.start_tls(443, Arc::new(ca));
+    }
 
     tauri::Builder::default()
         .manage(AppState {
@@ -399,6 +437,7 @@ pub fn run() {
             set_switch_mode,
             grant_permission,
             panic_restore,
+            set_https_enabled,
             validate_hosts_text,
             check_update,
             install_update,

@@ -39,6 +39,9 @@ struct StoredState {
     /// If true, selecting a non-base profile turns off other non-base profiles automatically (Single Switch Mode).
     /// If false, multiple profiles can be toggled concurrently (Combined Mode).
     pub single_switch_mode: bool,
+    /// Serve mapped domains over HTTPS (port 443) with certificates from the local CA.
+    #[serde(default)]
+    pub https_enabled: bool,
 }
 
 pub struct SnapHostManager {
@@ -96,6 +99,7 @@ impl SnapHostManager {
             let initial_state = StoredState {
                 profiles: initial_profiles,
                 single_switch_mode: false,
+                https_enabled: false,
             };
             let serialized = serde_json::to_string_pretty(&initial_state)?;
             fs::write(&state_path, serialized)?;
@@ -135,6 +139,19 @@ impl SnapHostManager {
             let _ = self.apply_to_system();
         }
         Ok(())
+    }
+
+    pub fn data_dir(&self) -> &Path {
+        &self.data_dir
+    }
+
+    pub fn https_enabled(&self) -> bool {
+        self.state.https_enabled
+    }
+
+    pub fn set_https_enabled(&mut self, enabled: bool) -> Result<(), SnapHostError> {
+        self.state.https_enabled = enabled;
+        self.save_state()
     }
 
     pub fn status(&self) -> SystemStatus {

@@ -2,7 +2,7 @@ const invoke = window.__TAURI__?.core?.invoke;
 const listen = window.__TAURI__?.event?.listen;
 
 let appState = {
-  app_version: "0.1.5",
+  app_version: "0.1.6",
   profiles: [],
   single_switch_mode: false,
   status: null,
@@ -10,6 +10,9 @@ let appState = {
   port_statuses: [],
   proxy_running: false,
   proxy_port: 80,
+  https_enabled: false,
+  https_port: null,
+  https_trusted: false,
 };
 let selectedProfileId = null;
 let editorProfileId = null;
@@ -21,6 +24,7 @@ let toastTimer = null;
 const profileListEl = document.getElementById("profile-list");
 const ledgerSummaryEl = document.getElementById("ledger-summary");
 const chkSingleMode = document.getElementById("chk-single-mode");
+const chkHttps = document.getElementById("chk-https");
 const inputProfileName = document.getElementById("input-profile-name");
 const badgeActiveState = document.getElementById("badge-active-state");
 const badgeDirtyState = document.getElementById("badge-dirty-state");
@@ -101,6 +105,7 @@ function applySnapshot(snapshot) {
     appVersionEl.textContent = `v${snapshot.app_version}`;
   }
   chkSingleMode.checked = snapshot.single_switch_mode;
+  chkHttps.checked = snapshot.https_enabled;
 
   if (!selectedProfileId || !snapshot.profiles.some((p) => p.id === selectedProfileId)) {
     selectedProfileId = snapshot.profiles[0]?.id || null;
@@ -285,6 +290,25 @@ function renderPortMappings() {
     proxyLabel.textContent = `프록시 :${appState.proxy_port}`;
     proxyBadge.appendChild(proxyLabel);
     portMappingSummary.appendChild(proxyBadge);
+  }
+
+  if (appState.https_enabled) {
+    const httpsBadge = document.createElement("span");
+    httpsBadge.className = "route-chip mono num";
+    const ok = appState.https_port && appState.https_trusted;
+    httpsBadge.title = !appState.https_port
+      ? "HTTPS 리스너가 실행 중이 아닙니다"
+      : appState.https_trusted
+        ? `로컬 인증서로 https:// 를 :${appState.https_port} 포트에서 제공 중입니다`
+        : "로컬 인증서가 키체인에서 신뢰되지 않습니다. 토글을 껐다 켜서 다시 등록하세요";
+    const dot = document.createElement("span");
+    dot.className = ok ? "status-dot live" : "status-dot";
+    const label = document.createElement("span");
+    label.className = "muted";
+    label.textContent = `HTTPS :${appState.https_port ?? "-"}`;
+    httpsBadge.appendChild(dot);
+    httpsBadge.appendChild(label);
+    portMappingSummary.appendChild(httpsBadge);
   }
 
   statuses.slice(0, 4).forEach((s) => {
@@ -505,6 +529,19 @@ chkSingleMode.onchange = async () => {
   });
   applySnapshot(snapshot);
   showToast(chkSingleMode.checked ? "단일 전환 모드 켜짐" : "다중 병합 모드 켜짐");
+};
+
+chkHttps.onchange = async () => {
+  const enabled = chkHttps.checked;
+  if (enabled) showToast("로컬 인증서를 키체인에 등록합니다. macOS 암호 창을 확인하세요");
+  try {
+    const snapshot = await invoke("set_https_enabled", { enabled });
+    applySnapshot(snapshot);
+    showToast(enabled ? "로컬 HTTPS 켜짐" : "로컬 HTTPS 꺼짐 (인증서 제거됨)");
+  } catch (err) {
+    chkHttps.checked = !enabled;
+    showToast(`로컬 HTTPS 설정 실패: ${err}`);
+  }
 };
 
 btnGrantPerm.onclick = async () => {

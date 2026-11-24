@@ -205,6 +205,10 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+.mode-switch-label + .mode-switch-label {
+  margin-top: 8px;
+}
+
 .mode-switch-label {
   display: flex;
   align-items: center;

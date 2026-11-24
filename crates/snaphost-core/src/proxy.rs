@@ -1,9 +1,11 @@
+use crate::cert::LocalCa;
 use crate::parser::PortMapping;
+use crate::tls::{self, TlsListener};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::{
-    Arc, RwLock,
+    Arc, Mutex, RwLock,
     atomic::{AtomicBool, Ordering},
 };
 use std::thread;
@@ -15,6 +17,7 @@ pub struct LocalReverseProxy {
     routes: Arc<RwLock<HashMap<String, SocketAddr>>>,
     running: Arc<AtomicBool>,
     listen_port: Arc<RwLock<u16>>,
+    tls: Arc<Mutex<Option<TlsListener>>>,
 }
 
 impl Default for LocalReverseProxy {
@@ -29,6 +32,7 @@ impl LocalReverseProxy {
             routes: Arc::new(RwLock::new(HashMap::new())),
             running: Arc::new(AtomicBool::new(false)),
             listen_port: Arc::new(RwLock::new(80)),
+            tls: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -96,6 +100,33 @@ impl LocalReverseProxy {
         }
 
         Ok(bound_port)
+    }
+
+    /// Start the HTTPS listener (defaults to 443) sharing this proxy's routing table.
+    pub fn start_tls(&self, preferred_port: u16, ca: Arc<LocalCa>) -> Result<u16, String> {
+        let mut slot = self.tls.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(l) = slot.as_ref() {
+            return Ok(l.port);
+        }
+        let listener = tls::start(preferred_port, ca, Arc::clone(&self.routes))?;
+        let port = listener.port;
+        *slot = Some(listener);
+        Ok(port)
+    }
+
+    pub fn stop_tls(&self) {
+        if let Some(l) = self.tls.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            l.stop();
+        }
+    }
+
+    /// Port of the running HTTPS listener, if any.
+    pub fn tls_port(&self) -> Option<u16> {
+        self.tls
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|l| l.port)
     }
 
     fn spawn_accept_loop(

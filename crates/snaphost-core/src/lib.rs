@@ -1,10 +1,13 @@
+pub mod cert;
 pub mod merger;
 pub mod parser;
 pub mod profile;
 pub mod proxy;
 pub mod system;
+pub mod tls;
 pub mod updater;
 
+pub use cert::{LocalCa, install_ca_trust, is_ca_trusted, remove_ca};
 pub use merger::{DomainConflict, MergeResult, merge_profiles};
 pub use parser::{HostEntry, HostsLine, PortMapping, ValidationIssue, parse_hosts, validate_hosts};
 pub use profile::Profile;
